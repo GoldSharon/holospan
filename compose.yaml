@@ -1,0 +1,205 @@
+name: holospan
+
+services:
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    image: holospan/frontend:0.1.0
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    networks:
+      - edge
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+      - /var/cache/nginx:size=64m,mode=0755,uid=101,gid=101
+      - /var/run:size=16m,mode=0755,uid=101,gid=101
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 512m
+    cpus: 0.75
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/healthz >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: holospan/backend:0.1.0
+    restart: unless-stopped
+    environment:
+      HOLOSPAN_ENV: ${HOLOSPAN_ENV:-development}
+      HOLOSPAN_DATABASE_URL: postgresql+asyncpg://${HOLOSPAN_POSTGRES_USER:-holospan}:${HOLOSPAN_POSTGRES_PASSWORD:-replace-with-a-long-random-password}@postgres:5432/${HOLOSPAN_POSTGRES_DB:-holospan}
+      HOLOSPAN_CORS_ORIGINS: http://localhost:8080
+      HOLOSPAN_DOCS_ENABLED: "true"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8000:8000"
+    networks:
+      - edge
+      - data
+    read_only: true
+    tmpfs:
+      - /tmp:size=128m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 2g
+    cpus: 2.0
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health/liveness', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 15s
+
+  postgres:
+    image: postgres:17.12-bookworm
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${HOLOSPAN_POSTGRES_DB:-holospan}
+      POSTGRES_USER: ${HOLOSPAN_POSTGRES_USER:-holospan}
+      POSTGRES_PASSWORD: ${HOLOSPAN_POSTGRES_PASSWORD:-replace-with-a-long-random-password}
+      POSTGRES_INITDB_ARGS: --data-checksums
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - data
+    shm_size: 512m
+    mem_limit: 4g
+    cpus: 2.0
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:25.11.2.24-alpine
+    restart: unless-stopped
+    environment:
+      CLICKHOUSE_DB: holospan
+      CLICKHOUSE_USER: ${HOLOSPAN_CLICKHOUSE_USER:-holospan}
+      CLICKHOUSE_PASSWORD: ${HOLOSPAN_CLICKHOUSE_PASSWORD:-replace-with-a-long-random-password}
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+    ports:
+      - "127.0.0.1:8123:8123"
+      - "127.0.0.1:9009:9000"
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+      - clickhouse_logs:/var/log/clickhouse-server
+    networks:
+      - data
+    mem_limit: 8g
+    cpus: 3.0
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8123/ping | grep -q Ok"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  minio:
+    image: bitnamilegacy/minio:2025.7.23-debian-12-r5
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: ${HOLOSPAN_MINIO_ROOT_USER:-holospan-admin}
+      MINIO_ROOT_PASSWORD: ${HOLOSPAN_MINIO_ROOT_PASSWORD:-replace-with-a-long-random-password}
+      MINIO_DEFAULT_BUCKETS: holospan-raw,holospan-evidence,holospan-exports
+    ports:
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
+    volumes:
+      - minio_data:/bitnami/minio/data
+    networks:
+      - data
+    mem_limit: 3g
+    cpus: 1.5
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:9000/minio/health/live >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  redpanda:
+    image: redpandadata/redpanda:v25.3.4
+    restart: unless-stopped
+    command:
+      - redpanda
+      - start
+      - --mode=dev-container
+      - --smp=2
+      - --memory=3G
+      - --reserve-memory=0M
+      - --node-id=0
+      - --check=false
+      - --kafka-addr=internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr=internal://redpanda:9092,external://localhost:19092
+    ports:
+      - "127.0.0.1:19092:19092"
+      - "127.0.0.1:19644:9644"
+    volumes:
+      - redpanda_data:/var/lib/redpanda/data
+    networks:
+      - data
+    mem_limit: 4g
+    cpus: 2.0
+    healthcheck:
+      test: ["CMD", "rpk", "cluster", "health", "--exit-when-healthy"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+
+  redis:
+    image: redis:8.8.4-alpine3.23
+    profiles: ["cache"]
+    restart: unless-stopped
+    command: ["redis-server", "--requirepass", "${HOLOSPAN_REDIS_PASSWORD:-replace-with-a-long-random-password}", "--save", "", "--appendonly", "no"]
+    ports:
+      - "127.0.0.1:6379:6379"
+    networks:
+      - data
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 1g
+    cpus: 0.5
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a '$${HOLOSPAN_REDIS_PASSWORD:-replace-with-a-long-random-password}' ping | grep -q PONG"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+
+networks:
+  edge:
+    driver: bridge
+  data:
+    driver: bridge
+    internal: true
+
+volumes:
+  postgres_data:
+  clickhouse_data:
+  clickhouse_logs:
+  minio_data:
+  redpanda_data:

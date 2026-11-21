@@ -1,0 +1,53 @@
+[project]
+name = "holospan-api"
+version = "0.1.0"
+description = "Holospan AI assurance control-plane API"
+requires-python = "==3.13.*"
+dependencies = [
+  "alembic==1.20.1",
+  "asyncpg==0.32.0",
+  "fastapi==0.165.0",
+  "pydantic==2.14.4",
+  "pydantic-settings==2.16.3",
+  "sqlalchemy[asyncio]==2.1.9",
+  "structlog==26.1.0",
+  "uvicorn[standard]==0.54.0",
+]
+
+[dependency-groups]
+dev = [
+  "bandit==1.9.4",
+  "httpx==0.28.1",
+  "mypy==2.4.1",
+  "pip-audit==2.10.1",
+  "pytest==9.2.0",
+  "pytest-asyncio==1.5.0",
+  "ruff==0.17.6",
+]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+addopts = "-q --strict-markers"
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "S", "ASYNC"]
+ignore = ["S101"]
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+plugins = ["pydantic.mypy"]
+mypy_path = "src"
+
+[tool.bandit]
+exclude_dirs = ["tests"]

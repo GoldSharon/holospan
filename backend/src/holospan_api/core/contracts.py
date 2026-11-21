@@ -1,0 +1,38 @@
+from datetime import datetime
+from typing import TypeVar
+
+from pydantic import BaseModel, ConfigDict, Field
+
+T = TypeVar("T")
+
+
+class Meta(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    request_id: str = Field(alias="requestId")
+    timestamp: datetime
+
+
+class Envelope[T](BaseModel):
+    data: T
+    meta: Meta
+
+
+class ErrorDetail(BaseModel):
+    field: str | None = None
+    code: str
+    message: str
+
+
+class ErrorBody(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    code: str
+    message: str
+    details: list[ErrorDetail] = Field(default_factory=list)
+    request_id: str = Field(alias="requestId")
+    timestamp: datetime
+
+
+class ErrorEnvelope(BaseModel):
+    error: ErrorBody

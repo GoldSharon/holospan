@@ -1,0 +1,77 @@
+name: holospan-ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  application:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22.22.3
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@1e862dfacbd1d6d858c55d9b792c756523627244 # v7.1.4
+        with:
+          version: 0.13.4
+          enable-cache: true
+
+      - name: Frontend gates
+        working-directory: frontend
+        run: |
+          npm ci
+          npm audit --audit-level=high
+          npm run lint
+          npm run typecheck
+          npm test -- --run
+          npm run build
+
+      - name: Backend gates
+        working-directory: backend
+        run: |
+          uv sync --frozen
+          uv run pip-audit
+          uv run bandit -q -r src
+          uv run ruff check .
+          uv run mypy src
+          uv run pytest
+
+      - name: Validate Compose
+        run: docker compose config --quiet
+
+      - name: Build application images
+        run: docker compose build frontend backend
+
+  dast:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Run authorized local DAST baseline
+        run: ./scripts/security/dast.sh
+
+      - name: Stop containers
+        if: always()
+        run: docker compose down --volumes
+
+      - name: Upload DAST report
+        if: always()
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.0
+        with:
+          name: zap-reports
+          path: security/reports/

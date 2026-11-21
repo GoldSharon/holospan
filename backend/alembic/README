@@ -1,0 +1,5 @@
+Database migrations for the Holospan PostgreSQL authority.
+
+Each migration must name its owning business domain and include an explicit
+downgrade or a documented reason why downgrade is unsafe. Schema changes are
+reviewed independently from application deployment.

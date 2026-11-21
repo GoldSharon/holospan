@@ -1,0 +1,8 @@
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Synthetic bearer-token examples in imported REA Stage 1 research evidence"
+paths = [
+  '''(^|/)evidence/rea-stage1/rook-agent-assurance\.evidence\.json$''',
+]
