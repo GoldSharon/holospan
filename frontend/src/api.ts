@@ -60,6 +60,30 @@ const sessionEnvelopeSchema = z.object({
   meta: metaSchema,
 })
 
+const systemSummarySchema = z.object({
+  id: z.string().uuid(),
+  tenantId: z.string().uuid(),
+  displayName: z.string(),
+  slug: z.string(),
+  description: z.string().optional().nullable(),
+  systemType: z.enum(['agent', 'rag', 'workflow', 'model', 'api', 'other']),
+  lifecycleStage: z.enum(['development', 'staging', 'production']),
+  status: z.literal('draft'),
+  createdBy: z.string().uuid(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+})
+
+const systemsEnvelopeSchema = z.object({
+  data: z.object({ items: z.array(systemSummarySchema) }),
+  meta: metaSchema,
+})
+
+const systemEnvelopeSchema = z.object({
+  data: systemSummarySchema,
+  meta: metaSchema,
+})
+
 const errorEnvelopeSchema = z.object({
   error: z.object({
     code: z.string(),
@@ -72,6 +96,16 @@ export type CapabilitiesEnvelope = z.infer<typeof capabilitiesEnvelopeSchema>
 export type OidcConfigEnvelope = z.infer<typeof oidcConfigEnvelopeSchema>
 export type SessionEnvelope = z.infer<typeof sessionEnvelopeSchema>
 export type Membership = z.infer<typeof membershipSchema>
+export type SystemSummary = z.infer<typeof systemSummarySchema>
+export type SystemsEnvelope = z.infer<typeof systemsEnvelopeSchema>
+export type SystemEnvelope = z.infer<typeof systemEnvelopeSchema>
+export type CreateSystemInput = {
+  displayName: string
+  slug: string
+  description?: string | null
+  systemType: SystemSummary['systemType']
+  lifecycleStage: SystemSummary['lifecycleStage']
+}
 
 export class ApiError extends Error {
   constructor(
@@ -127,6 +161,40 @@ export async function fetchCapabilities(
     signal,
   })
   return parseResponse(response, capabilitiesEnvelopeSchema)
+}
+
+export async function fetchSystems(
+  tenantId: string,
+  signal?: AbortSignal,
+): Promise<SystemsEnvelope> {
+  const response = await fetch('/api/v1/system-context/systems?limit=50', {
+    credentials: 'same-origin',
+    headers: {
+      Accept: 'application/json',
+      'X-Holospan-Tenant-ID': tenantId,
+    },
+    signal,
+  })
+  return parseResponse(response, systemsEnvelopeSchema)
+}
+
+export async function createSystem(
+  tenantId: string,
+  csrfToken: string,
+  input: CreateSystemInput,
+): Promise<SystemEnvelope> {
+  const response = await fetch('/api/v1/system-context/systems', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      'X-Holospan-Tenant-ID': tenantId,
+      'X-CSRF-Token': csrfToken,
+    },
+    body: JSON.stringify(input),
+  })
+  return parseResponse(response, systemEnvelopeSchema)
 }
 
 export async function logout(csrfToken: string): Promise<void> {
