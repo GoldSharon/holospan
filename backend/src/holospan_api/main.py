@@ -9,6 +9,7 @@ from holospan_api.core.http import RequestContextMiddleware, validation_error_ha
 from holospan_api.domains.identity_access.errors import IdentityProblem, identity_problem_handler
 from holospan_api.domains.identity_access.http import platform_router, tenant_router
 from holospan_api.domains.system_catalog.http import router as system_catalog_router
+from holospan_api.domains.system_context.http import router as system_context_router
 from holospan_api.platform.health import router as health_router
 
 logger = structlog.get_logger()
@@ -46,6 +47,7 @@ app.include_router(health_router)
 app.include_router(tenant_router)
 app.include_router(platform_router)
 app.include_router(system_catalog_router)
+app.include_router(system_context_router)
 
 
 @app.exception_handler(RequestValidationError)

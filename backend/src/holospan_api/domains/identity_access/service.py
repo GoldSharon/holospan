@@ -239,6 +239,28 @@ class IdentityService:
                 request.actor, "tenant.context.match", tenant_id, request_id
             )
             raise permission_denied()
+
+    async def authorize_tenant(
+        self,
+        request: AuthenticatedRequest,
+        tenant_id: UUID,
+        *,
+        permission: str,
+        request_id: str,
+    ) -> None:
+        """Authorize and activate a signed RLS context for a tenant-domain operation."""
+        await self.require_selected_tenant(request, tenant_id, request_id=request_id)
+        await self._require(
+            request.actor,
+            permission,
+            tenant_id=tenant_id,
+            request_id=request_id,
+        )
+        await self.tenant_repository.activate_tenant_context(
+            actor=request.actor,
+            tenant_id=tenant_id,
+        )
+
     async def logout(self, request: AuthenticatedRequest) -> None:
         if request.actor.session_id is not None:
             await self.repository.revoke_session(request.actor.session_id, now=datetime.now(UTC))

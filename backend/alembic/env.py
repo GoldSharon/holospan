@@ -10,6 +10,7 @@ from alembic import context
 from holospan_api.core.config import get_settings
 from holospan_api.core.database import Base
 from holospan_api.domains.identity_access import models as identity_models  # noqa: F401
+from holospan_api.domains.system_context import models as system_context_models  # noqa: F401
 
 config = context.config
 if config.config_file_name is not None:
