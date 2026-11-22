@@ -6,3 +6,9 @@ description = "Synthetic bearer-token examples in imported REA Stage 1 research 
 paths = [
   '''(^|/)evidence/rea-stage1/rook-agent-assurance\.evidence\.json$''',
 ]
+
+[[allowlists]]
+description = "Generated, gitignored local Keycloak credentials"
+paths = [
+  '''(^|/)\.env\.local-idp$''',
+]

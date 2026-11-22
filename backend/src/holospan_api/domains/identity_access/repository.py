@@ -300,13 +300,18 @@ class IdentityRepository:
         principal: Principal,
         request_id: str,
     ) -> bool:
+        # Serialize the one-time bootstrap without row-locking the immutable role
+        # catalog. SELECT FOR UPDATE would require UPDATE privileges that the
+        # least-privileged authentication runtime intentionally does not hold.
+        await self.session.execute(
+            text("SELECT pg_advisory_xact_lock(-6706654064955872707)")
+        )
         admin_role = await self.session.scalar(
             select(PlatformRole)
             .where(
                 PlatformRole.key == "platform_admin",
                 PlatformRole.is_system.is_(True),
             )
-            .with_for_update()
         )
         if admin_role is None:
             raise RuntimeError("platform_admin role is not seeded")

@@ -5,7 +5,7 @@ import secrets
 import time
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 
 import httpx
 import jwt
@@ -132,6 +132,7 @@ class OidcProvider:
         self,
         *,
         issuer: str,
+        discovery_url: str | None = None,
         client_id: str,
         client_secret: str | None,
         algorithms: list[str],
@@ -140,11 +141,20 @@ class OidcProvider:
         client: httpx.AsyncClient | None = None,
     ) -> None:
         normalized = issuer.rstrip("/")
-        if not allow_insecure_http and not normalized.startswith("https://"):
+        configured_schemes = {"http", "https"} if allow_insecure_http else {"https"}
+        if urlsplit(normalized).scheme not in configured_schemes:
             raise ValueError("OIDC issuer must use HTTPS")
+        resolved_discovery_url = (
+            discovery_url
+            if discovery_url is not None
+            else f"{normalized}/.well-known/openid-configuration"
+        )
+        if urlsplit(resolved_discovery_url).scheme not in configured_schemes:
+            raise ValueError("OIDC discovery URL must use HTTPS")
         if any(value.lower() == "none" or value.startswith("HS") for value in algorithms):
             raise ValueError("OIDC algorithm allowlist contains an unsafe algorithm")
         self.issuer = normalized
+        self.discovery_url = resolved_discovery_url
         self.client_id = client_id
         self.client_secret = client_secret
         self.algorithms = algorithms
@@ -159,7 +169,7 @@ class OidcProvider:
             return self._metadata[1]
         try:
             response = await self._client.get(
-                f"{self.issuer}/.well-known/openid-configuration",
+                self.discovery_url,
                 headers={"Accept": "application/json"},
             )
             response.raise_for_status()
@@ -176,12 +186,13 @@ class OidcProvider:
             raise AuthenticationFailed from exc
         if metadata.issuer != self.issuer:
             raise AuthenticationFailed
+        allowed_schemes = {"http", "https"} if self.issuer.startswith("http://") else {"https"}
         for endpoint in (
             metadata.authorization_endpoint,
             metadata.token_endpoint,
             metadata.jwks_uri,
         ):
-            if not endpoint.startswith("https://") and not self.issuer.startswith("http://"):
+            if urlsplit(endpoint).scheme not in allowed_schemes:
                 raise AuthenticationFailed
         self._metadata = (now + self.cache_seconds, metadata)
         return metadata

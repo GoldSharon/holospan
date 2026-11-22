@@ -108,6 +108,49 @@ async def test_ac1_provider_validates_fixed_issuer_audience_nonce_and_signature(
     ]
 
 
+async def test_provider_supports_internal_discovery_without_weakening_fixed_issuer() -> None:
+    requested_urls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requested_urls.append(str(request.url))
+        return httpx.Response(
+            200,
+            json={
+                "issuer": "http://localhost:8082/realms/holospan-local",
+                "authorization_endpoint": (
+                    "http://localhost:8082/realms/holospan-local/protocol/openid-connect/auth"
+                ),
+                "token_endpoint": (
+                    "http://keycloak:8080/realms/holospan-local/protocol/openid-connect/token"
+                ),
+                "jwks_uri": (
+                    "http://keycloak:8080/realms/holospan-local/protocol/openid-connect/certs"
+                ),
+            },
+        )
+
+    provider = OidcProvider(
+        issuer="http://localhost:8082/realms/holospan-local",
+        discovery_url=(
+            "http://keycloak:8080/realms/holospan-local/.well-known/openid-configuration"
+        ),
+        client_id="holospan-tenant-web",
+        client_secret="local-test-secret",  # noqa: S106
+        algorithms=["RS256"],
+        cache_seconds=300,
+        allow_insecure_http=True,
+        client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+
+    metadata = await provider.metadata()
+
+    assert metadata.issuer == "http://localhost:8082/realms/holospan-local"
+    assert metadata.token_endpoint.startswith("http://keycloak:8080/")
+    assert requested_urls == [
+        "http://keycloak:8080/realms/holospan-local/.well-known/openid-configuration"
+    ]
+
+
 async def test_ac2_wrong_audience_returns_generic_authentication_failure() -> None:
     private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     public_jwk = json.loads(RSAAlgorithm.to_jwk(private_key.public_key()))

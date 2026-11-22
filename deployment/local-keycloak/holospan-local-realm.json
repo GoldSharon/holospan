@@ -1,0 +1,93 @@
+{
+  "realm": "holospan-local",
+  "enabled": true,
+  "displayName": "Holospan",
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "resetPasswordAllowed": false,
+  "rememberMe": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "bruteForceProtected": true,
+  "failureFactor": 5,
+  "waitIncrementSeconds": 60,
+  "maxFailureWaitSeconds": 900,
+  "clients": [
+    {
+      "clientId": "holospan-tenant-web",
+      "name": "Holospan tenant workspace",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "secret": "${HOLOSPAN_LOCAL_TENANT_CLIENT_SECRET}",
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "redirectUris": [
+        "http://localhost:8080/api/v1/identity-access/callback"
+      ],
+      "webOrigins": [
+        "http://localhost:8080"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "http://localhost:8080/*"
+      },
+      "defaultClientScopes": [
+        "web-origins",
+        "acr",
+        "profile",
+        "roles",
+        "email"
+      ]
+    },
+    {
+      "clientId": "holospan-platform-web",
+      "name": "Holospan platform administration",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "secret": "${HOLOSPAN_LOCAL_PLATFORM_CLIENT_SECRET}",
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "redirectUris": [
+        "http://platform.localhost:8081/api/v1/platform/identity-access/callback"
+      ],
+      "webOrigins": [
+        "http://platform.localhost:8081"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "http://platform.localhost:8081/*"
+      },
+      "defaultClientScopes": [
+        "web-origins",
+        "acr",
+        "profile",
+        "roles",
+        "email"
+      ]
+    }
+  ],
+  "users": [
+    {
+      "id": "00000000-0000-4000-8000-000000000001",
+      "username": "${HOLOSPAN_LOCAL_USER_USERNAME}",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Holospan",
+      "lastName": "Tester",
+      "email": "tester@holospan.local",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "${HOLOSPAN_LOCAL_USER_PASSWORD}",
+          "temporary": false
+        }
+      ]
+    }
+  ]
+}

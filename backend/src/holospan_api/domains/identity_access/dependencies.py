@@ -40,6 +40,7 @@ def _provider(
     *,
     enabled: bool,
     issuer: str | None,
+    discovery_url: str | None,
     client_id: str | None,
     client_secret: str | None,
     settings: Settings,
@@ -48,6 +49,7 @@ def _provider(
         return None
     return OidcProvider(
         issuer=issuer,
+        discovery_url=discovery_url,
         client_id=client_id,
         client_secret=client_secret,
         algorithms=settings.oidc_algorithm_list,
@@ -62,6 +64,7 @@ def tenant_provider() -> OidcProvider | None:
     return _provider(
         enabled=settings.oidc_enabled,
         issuer=settings.oidc_issuer,
+        discovery_url=settings.oidc_discovery_url,
         client_id=settings.oidc_client_id,
         client_secret=(
             settings.oidc_client_secret.get_secret_value()
@@ -78,6 +81,7 @@ def platform_provider() -> OidcProvider | None:
     return _provider(
         enabled=settings.platform_oidc_enabled,
         issuer=settings.platform_oidc_issuer,
+        discovery_url=settings.platform_oidc_discovery_url,
         client_id=settings.platform_oidc_client_id,
         client_secret=(
             settings.platform_oidc_client_secret.get_secret_value()

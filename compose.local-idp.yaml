@@ -1,0 +1,65 @@
+services:
+  keycloak:
+    build:
+      context: ./deployment/local-keycloak
+      dockerfile: Dockerfile
+    image: holospan/keycloak:26.8.2-3-guava-33.7.2
+    command: ["start-dev", "--import-realm"]
+    restart: unless-stopped
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${HOLOSPAN_KEYCLOAK_ADMIN_USERNAME:-holospan-local-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${HOLOSPAN_KEYCLOAK_ADMIN_PASSWORD:?set the local Keycloak administrator password}
+      KC_HEALTH_ENABLED: "true"
+      KC_HOSTNAME: http://localhost:8082
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
+      KC_HTTP_ENABLED: "true"
+      KC_HTTP_HOST: 0.0.0.0
+      KC_HTTP_PORT: "8080"
+      KC_LOG_LEVEL: info
+      HOLOSPAN_LOCAL_TENANT_CLIENT_SECRET: ${HOLOSPAN_LOCAL_TENANT_CLIENT_SECRET:?set the local tenant OIDC client secret}
+      HOLOSPAN_LOCAL_PLATFORM_CLIENT_SECRET: ${HOLOSPAN_LOCAL_PLATFORM_CLIENT_SECRET:?set the local platform OIDC client secret}
+      HOLOSPAN_LOCAL_USER_USERNAME: ${HOLOSPAN_LOCAL_USER_USERNAME:-holospan-user}
+      HOLOSPAN_LOCAL_USER_PASSWORD: ${HOLOSPAN_LOCAL_USER_PASSWORD:?set the local test-user password}
+    ports:
+      - "127.0.0.1:8082:8080"
+    volumes:
+      - ./deployment/local-keycloak/holospan-local-realm.json:/opt/keycloak/data/import/holospan-local-realm.json:ro
+    networks:
+      - edge
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 1536m
+    cpus: 1.5
+    healthcheck:
+      test:
+        - CMD
+        - bash
+        - -c
+        - "{ printf 'HEAD /health/ready HTTP/1.0\r\n\r\n' >&0; grep 'HTTP/1.0 200'; } 0<>/dev/tcp/127.0.0.1/9000"
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 45s
+
+  backend:
+    environment:
+      HOLOSPAN_OIDC_ENABLED: "true"
+      HOLOSPAN_OIDC_ISSUER: http://localhost:8082/realms/holospan-local
+      HOLOSPAN_OIDC_DISCOVERY_URL: http://keycloak:8080/realms/holospan-local/.well-known/openid-configuration
+      HOLOSPAN_OIDC_CLIENT_ID: holospan-tenant-web
+      HOLOSPAN_OIDC_CLIENT_SECRET: ${HOLOSPAN_LOCAL_TENANT_CLIENT_SECRET:?set the local tenant OIDC client secret}
+      HOLOSPAN_OIDC_REDIRECT_URI: http://localhost:8080/api/v1/identity-access/callback
+      HOLOSPAN_OIDC_FRONTEND_URI: http://localhost:8080/
+      HOLOSPAN_PLATFORM_OIDC_ENABLED: "true"
+      HOLOSPAN_PLATFORM_OIDC_ISSUER: http://localhost:8082/realms/holospan-local
+      HOLOSPAN_PLATFORM_OIDC_DISCOVERY_URL: http://keycloak:8080/realms/holospan-local/.well-known/openid-configuration
+      HOLOSPAN_PLATFORM_OIDC_CLIENT_ID: holospan-platform-web
+      HOLOSPAN_PLATFORM_OIDC_CLIENT_SECRET: ${HOLOSPAN_LOCAL_PLATFORM_CLIENT_SECRET:?set the local platform OIDC client secret}
+      HOLOSPAN_PLATFORM_OIDC_REDIRECT_URI: http://platform.localhost:8081/api/v1/platform/identity-access/callback
+      HOLOSPAN_PLATFORM_OIDC_FRONTEND_URI: http://platform.localhost:8081/
+      HOLOSPAN_BOOTSTRAP_PLATFORM_ADMINS: ${HOLOSPAN_BOOTSTRAP_PLATFORM_ADMINS:-}
+    depends_on:
+      keycloak:
+        condition: service_healthy

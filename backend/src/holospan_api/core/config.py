@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     max_request_bytes: int = Field(default=2 * 1024 * 1024, ge=1024, le=10 * 1024 * 1024)
     oidc_enabled: bool = False
     oidc_issuer: str | None = None
+    oidc_discovery_url: str | None = None
     oidc_client_id: str | None = None
     oidc_client_secret: SecretStr | None = None
     oidc_redirect_uri: str = "http://localhost:8080/api/v1/identity-access/callback"
@@ -41,6 +42,7 @@ class Settings(BaseSettings):
     platform_admin_host: str = "platform.localhost"
     platform_oidc_enabled: bool = False
     platform_oidc_issuer: str | None = None
+    platform_oidc_discovery_url: str | None = None
     platform_oidc_client_id: str | None = None
     platform_oidc_client_secret: SecretStr | None = None
     platform_oidc_redirect_uri: str = (
@@ -79,9 +81,11 @@ class Settings(BaseSettings):
                 raise ValueError("production platform OIDC requires a client secret")
             urls = [
                 self.oidc_issuer,
+                self.oidc_discovery_url,
                 self.oidc_redirect_uri,
                 self.oidc_frontend_uri,
                 self.platform_oidc_issuer,
+                self.platform_oidc_discovery_url,
                 self.platform_oidc_redirect_uri,
                 self.platform_oidc_frontend_uri,
             ]

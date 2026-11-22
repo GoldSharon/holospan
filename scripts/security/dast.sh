@@ -6,7 +6,16 @@ reports="$repo_root/security/reports"
 mkdir -p "$reports"
 cd "$repo_root"
 
-docker compose up --build -d postgres backend frontend
+compose_args=()
+if [[ -f "$repo_root/.env.local-idp" ]]; then
+  compose_args+=(
+    --env-file "$repo_root/.env.local-idp"
+    -f "$repo_root/compose.yaml"
+    -f "$repo_root/compose.local-idp.yaml"
+  )
+fi
+
+docker compose "${compose_args[@]}" up --build -d postgres backend frontend
 
 ready=0
 for _ in $(seq 1 60); do
@@ -18,7 +27,7 @@ for _ in $(seq 1 60); do
 done
 
 if [[ "$ready" -ne 1 ]]; then
-  docker compose logs --tail=200 frontend backend postgres
+  docker compose "${compose_args[@]}" logs --tail=200 frontend backend postgres
   exit 1
 fi
 
