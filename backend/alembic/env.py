@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 from alembic import context
 from holospan_api.core.config import get_settings
 from holospan_api.core.database import Base
+from holospan_api.domains.identity_access import models as identity_models  # noqa: F401
 
 config = context.config
 if config.config_file_name is not None:

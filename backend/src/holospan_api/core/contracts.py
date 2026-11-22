@@ -1,7 +1,8 @@
 from datetime import datetime
-from typing import TypeVar
+from typing import Any, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field
+from typing_extensions import TypeForm
 
 T = TypeVar("T")
 
@@ -16,6 +17,10 @@ class Meta(BaseModel):
 class Envelope[T](BaseModel):
     data: T
     meta: Meta
+
+    @classmethod
+    def model_parametrized_name(cls, params: tuple[TypeForm[Any], ...]) -> str:
+        return f"{getattr(params[0], '__name__', 'Data')}Envelope"
 
 
 class ErrorDetail(BaseModel):

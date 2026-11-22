@@ -40,12 +40,34 @@ services:
     restart: unless-stopped
     environment:
       HOLOSPAN_ENV: ${HOLOSPAN_ENV:-development}
-      HOLOSPAN_DATABASE_URL: postgresql+asyncpg://${HOLOSPAN_POSTGRES_USER:-holospan}:${HOLOSPAN_POSTGRES_PASSWORD:-replace-with-a-long-random-password}@postgres:5432/${HOLOSPAN_POSTGRES_DB:-holospan}
+      HOLOSPAN_DATABASE_URL: postgresql+asyncpg://${HOLOSPAN_AUTH_DB_USER:-holospan_auth}:${HOLOSPAN_AUTH_DB_PASSWORD:?set the auth runtime database password}@postgres:5432/${HOLOSPAN_POSTGRES_DB:-holospan}
+      HOLOSPAN_TENANT_DATABASE_URL: postgresql+asyncpg://${HOLOSPAN_TENANT_DB_USER:-holospan_tenant}:${HOLOSPAN_TENANT_DB_PASSWORD:?set the tenant runtime database password}@postgres:5432/${HOLOSPAN_POSTGRES_DB:-holospan}
       HOLOSPAN_CORS_ORIGINS: http://localhost:8080
       HOLOSPAN_DOCS_ENABLED: "true"
+      HOLOSPAN_IDENTITY_SESSION_SECRET: ${HOLOSPAN_IDENTITY_SESSION_SECRET:?set a random identity session secret of at least 32 bytes}
+      HOLOSPAN_IDENTITY_SESSION_SECONDS: ${HOLOSPAN_IDENTITY_SESSION_SECONDS:-3600}
+      HOLOSPAN_IDENTITY_COOKIE_SECURE: ${HOLOSPAN_IDENTITY_COOKIE_SECURE:-false}
+      HOLOSPAN_TENANT_APP_HOST: ${HOLOSPAN_TENANT_APP_HOST:-localhost}
+      HOLOSPAN_PLATFORM_ADMIN_HOST: ${HOLOSPAN_PLATFORM_ADMIN_HOST:-platform.localhost}
+      HOLOSPAN_BOOTSTRAP_PLATFORM_ADMINS: ${HOLOSPAN_BOOTSTRAP_PLATFORM_ADMINS:-}
+      HOLOSPAN_OIDC_ENABLED: ${HOLOSPAN_OIDC_ENABLED:-false}
+      HOLOSPAN_OIDC_ISSUER: ${HOLOSPAN_OIDC_ISSUER:-}
+      HOLOSPAN_OIDC_CLIENT_ID: ${HOLOSPAN_OIDC_CLIENT_ID:-}
+      HOLOSPAN_OIDC_CLIENT_SECRET: ${HOLOSPAN_OIDC_CLIENT_SECRET:-}
+      HOLOSPAN_OIDC_REDIRECT_URI: ${HOLOSPAN_OIDC_REDIRECT_URI:-http://localhost:8080/api/v1/identity-access/callback}
+      HOLOSPAN_OIDC_FRONTEND_URI: ${HOLOSPAN_OIDC_FRONTEND_URI:-http://localhost:8080/}
+      HOLOSPAN_OIDC_SCOPE: ${HOLOSPAN_OIDC_SCOPE:-openid profile email}
+      HOLOSPAN_OIDC_ALGORITHMS: ${HOLOSPAN_OIDC_ALGORITHMS:-RS256,ES256}
+      HOLOSPAN_OIDC_METADATA_CACHE_SECONDS: ${HOLOSPAN_OIDC_METADATA_CACHE_SECONDS:-300}
+      HOLOSPAN_PLATFORM_OIDC_ENABLED: ${HOLOSPAN_PLATFORM_OIDC_ENABLED:-false}
+      HOLOSPAN_PLATFORM_OIDC_ISSUER: ${HOLOSPAN_PLATFORM_OIDC_ISSUER:-}
+      HOLOSPAN_PLATFORM_OIDC_CLIENT_ID: ${HOLOSPAN_PLATFORM_OIDC_CLIENT_ID:-}
+      HOLOSPAN_PLATFORM_OIDC_CLIENT_SECRET: ${HOLOSPAN_PLATFORM_OIDC_CLIENT_SECRET:-}
+      HOLOSPAN_PLATFORM_OIDC_REDIRECT_URI: ${HOLOSPAN_PLATFORM_OIDC_REDIRECT_URI:-http://platform.localhost:8081/api/v1/platform/identity-access/callback}
+      HOLOSPAN_PLATFORM_OIDC_FRONTEND_URI: ${HOLOSPAN_PLATFORM_OIDC_FRONTEND_URI:-http://platform.localhost:8081/}
     depends_on:
-      postgres:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     ports:
       - "127.0.0.1:8000:8000"
     networks:
@@ -67,18 +89,85 @@ services:
       retries: 10
       start_period: 15s
 
+  platform-edge:
+    image: nginx:1.29.8-alpine3.23
+    profiles: ["platform-admin"]
+    user: "101:101"
+    restart: unless-stopped
+    environment:
+      NGINX_PLATFORM_ADMIN_HOST: ${HOLOSPAN_PLATFORM_ADMIN_HOST:-platform.localhost}
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8081:8081"
+    volumes:
+      - ./backend/platform-edge.nginx.conf.template:/etc/nginx/templates/default.conf.template:ro
+    networks:
+      - edge
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+      - /etc/nginx/conf.d:size=1m,mode=1777
+      - /var/cache/nginx:size=32m,mode=1777
+      - /var/run:size=8m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 256m
+    cpus: 0.25
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8081/healthz >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+  migrate:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: holospan/backend:0.1.0
+    command: ["alembic", "upgrade", "head"]
+    restart: "no"
+    environment:
+      HOLOSPAN_ENV: ${HOLOSPAN_ENV:-development}
+      HOLOSPAN_DATABASE_URL: postgresql+asyncpg://${HOLOSPAN_POSTGRES_USER:-holospan}:${HOLOSPAN_POSTGRES_PASSWORD:?set the migration owner database password}@postgres:5432/${HOLOSPAN_POSTGRES_DB:-holospan}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - data
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 512m
+    cpus: 0.5
+
   postgres:
     image: postgres:17.12-bookworm
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${HOLOSPAN_POSTGRES_DB:-holospan}
       POSTGRES_USER: ${HOLOSPAN_POSTGRES_USER:-holospan}
-      POSTGRES_PASSWORD: ${HOLOSPAN_POSTGRES_PASSWORD:-replace-with-a-long-random-password}
+      POSTGRES_PASSWORD: ${HOLOSPAN_POSTGRES_PASSWORD:?set the database owner password}
       POSTGRES_INITDB_ARGS: --data-checksums
+      HOLOSPAN_AUTH_DB_USER: ${HOLOSPAN_AUTH_DB_USER:-holospan_auth}
+      HOLOSPAN_AUTH_DB_PASSWORD: ${HOLOSPAN_AUTH_DB_PASSWORD:?set the auth runtime database password}
+      HOLOSPAN_TENANT_DB_USER: ${HOLOSPAN_TENANT_DB_USER:-holospan_tenant}
+      HOLOSPAN_TENANT_DB_PASSWORD: ${HOLOSPAN_TENANT_DB_PASSWORD:?set the tenant runtime database password}
+      HOLOSPAN_AUDIT_DB_USER: ${HOLOSPAN_AUDIT_DB_USER:-holospan_audit}
+      HOLOSPAN_AUDIT_DB_PASSWORD: ${HOLOSPAN_AUDIT_DB_PASSWORD:?set the audit runtime database password}
     ports:
       - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./backend/postgres/init-runtime-roles.sh:/docker-entrypoint-initdb.d/20-runtime-roles.sh:ro
     networks:
       - data
     shm_size: 512m

@@ -1,3 +1,5 @@
+from collections.abc import AsyncIterator
+
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -13,9 +15,9 @@ class Base(DeclarativeBase):
     """Base for domain-owned PostgreSQL mappings."""
 
 
-def create_engine() -> AsyncEngine:
+def create_engine(url: str) -> AsyncEngine:
     return create_async_engine(
-        get_settings().database_url,
+        url,
         pool_pre_ping=True,
         pool_size=5,
         max_overflow=5,
@@ -23,5 +25,20 @@ def create_engine() -> AsyncEngine:
     )
 
 
-engine = create_engine()
-session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+settings = get_settings()
+auth_engine = create_engine(settings.database_url)
+tenant_engine = create_engine(settings.tenant_database_url)
+auth_session_factory = async_sessionmaker(auth_engine, class_=AsyncSession, expire_on_commit=False)
+tenant_session_factory = async_sessionmaker(
+    tenant_engine, class_=AsyncSession, expire_on_commit=False
+)
+
+
+async def database_session() -> AsyncIterator[AsyncSession]:
+    async with auth_session_factory() as session:
+        yield session
+
+
+async def tenant_database_session() -> AsyncIterator[AsyncSession]:
+    async with tenant_session_factory() as session:
+        yield session

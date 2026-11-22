@@ -8,6 +8,13 @@ on:
 permissions:
   contents: read
 
+env:
+  HOLOSPAN_POSTGRES_PASSWORD: ci-owner-password-not-for-production
+  HOLOSPAN_AUTH_DB_PASSWORD: ci-auth-password-not-for-production
+  HOLOSPAN_TENANT_DB_PASSWORD: ci-tenant-password-not-for-production
+  HOLOSPAN_AUDIT_DB_PASSWORD: ci-audit-password-not-for-production
+  HOLOSPAN_IDENTITY_SESSION_SECRET: ci-identity-session-secret-at-least-32-bytes
+
 jobs:
   application:
     runs-on: ubuntu-24.04
@@ -53,7 +60,17 @@ jobs:
         run: docker compose config --quiet
 
       - name: Build application images
-        run: docker compose build frontend backend
+        run: docker compose build frontend backend migrate
+
+      - name: Verify migrations and tenant isolation
+        run: |
+          docker compose up -d postgres
+          docker compose run --rm migrate
+          ./scripts/test/identity-postgres.sh
+
+      - name: Stop integration services
+        if: always()
+        run: docker compose down --volumes
 
   dast:
     runs-on: ubuntu-24.04

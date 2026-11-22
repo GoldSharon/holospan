@@ -19,6 +19,8 @@ RUN groupadd --system --gid 10001 holospan \
 WORKDIR /app
 COPY --from=builder --chown=holospan:holospan /app/.venv /app/.venv
 COPY --chown=holospan:holospan src ./src
+COPY --chown=holospan:holospan alembic ./alembic
+COPY --chown=holospan:holospan alembic.ini ./alembic.ini
 USER holospan
 EXPOSE 8000
 CMD ["uvicorn", "holospan_api.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips=*"]

@@ -7,7 +7,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from holospan_api.core.config import get_settings
 from holospan_api.core.contracts import Envelope
-from holospan_api.core.database import engine
+from holospan_api.core.database import auth_engine
 from holospan_api.core.http import response_meta
 
 router = APIRouter(prefix="/api/v1/health", tags=["Health"])
@@ -28,6 +28,7 @@ class HealthData(BaseModel):
     description=(
         "Returns success when the API process can serve requests. It does not test dependencies."
     ),
+    openapi_extra={"security": []},
 )
 async def liveness(request: Request) -> Envelope[HealthData]:
     settings = get_settings()
@@ -43,13 +44,14 @@ async def liveness(request: Request) -> Envelope[HealthData]:
     responses={503: {"description": "A required dependency is unavailable"}},
     summary="Check API readiness",
     description="Checks the authoritative PostgreSQL dependency before declaring the API ready.",
+    openapi_extra={"security": []},
 )
 async def readiness(request: Request, response: Response) -> Envelope[HealthData]:
     settings = get_settings()
     database_status: DatabaseStatus = "ok"
 
     try:
-        async with engine.connect() as connection:
+        async with auth_engine.connect() as connection:
             await connection.execute(text("SELECT 1"))
     except SQLAlchemyError:
         database_status = "unavailable"

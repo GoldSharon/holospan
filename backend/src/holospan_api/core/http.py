@@ -11,7 +11,9 @@ from holospan_api.core.contracts import ErrorBody, ErrorDetail, ErrorEnvelope, M
 
 
 def response_meta(request: Request) -> Meta:
-    return Meta(request_id=request.state.request_id, timestamp=datetime.now(UTC))
+    return Meta.model_validate(
+        {"requestId": request.state.request_id, "timestamp": datetime.now(UTC)}
+    )
 
 
 class RequestContextMiddleware(BaseHTTPMiddleware):
@@ -37,19 +39,21 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
 async def validation_error_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
     request_id = getattr(request.state, "request_id", str(uuid4()))
     error = ErrorEnvelope(
-        error=ErrorBody(
-            code="VALIDATION_ERROR",
-            message="The request contains invalid parameters.",
-            details=[
-                ErrorDetail(
-                    field=".".join(str(part) for part in item["loc"]),
-                    code=str(item["type"]),
-                    message=str(item["msg"]),
-                )
-                for item in exc.errors()
-            ],
-            request_id=request_id,
-            timestamp=datetime.now(UTC),
+        error=ErrorBody.model_validate(
+            {
+                "code": "VALIDATION_ERROR",
+                "message": "The request contains invalid parameters.",
+                "details": [
+                    ErrorDetail(
+                        field=".".join(str(part) for part in item["loc"]),
+                        code=str(item["type"]),
+                        message=str(item["msg"]),
+                    )
+                    for item in exc.errors()
+                ],
+                "requestId": request_id,
+                "timestamp": datetime.now(UTC),
+            }
         )
     )
     return JSONResponse(status_code=422, content=error.model_dump(mode="json", by_alias=True))

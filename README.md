@@ -55,28 +55,26 @@ Holospan continuously connects both sides of the lifecycle:
 The platform itself is agentic, but consequential actions remain bounded by
 permissions, declared scope, evidence requirements, and human approval gates.
 
-## Design documents
-
-- [Product blueprint](docs/PRODUCT_BLUEPRINT.md)
-- [System architecture](docs/architecture/HOLOSPAN_SYSTEM_ARCHITECTURE.md)
-- [Ordered architecture package](docs/architecture/README.md)
-- [Source-product and standards research](docs/SOURCE_PRODUCT_RESEARCH.md)
-- [REA capability-check plan](docs/REA_CAPABILITY_CHECK_PLAN.md)
-
 ## Current state
 
 The first implementation foundation is runnable:
 
 - React, TypeScript, Vite and Tailwind frontend;
 - FastAPI modular-monolith backend organized by business capability;
+- provider-neutral OIDC authorization-code/PKCE login through a backend-for-frontend;
+- opaque HttpOnly sessions, CSRF protection, tenant/platform plane separation,
+  deny-by-default RBAC and a dedicated loopback-only platform edge;
+- separate migration-owner, authentication-runtime, tenant-runtime and
+  audit-writer database roles with validated signed RLS context;
+- cursor-paginated identity APIs and tamper-evident authorization audit sealing;
 - PostgreSQL, ClickHouse, MinIO and Redpanda in a pinned Docker Compose profile;
 - Alembic migration infrastructure;
 - non-root application containers and private data-service bindings; and
 - lint, type, unit, dependency, secret, SAST and DAST gates.
 
-The current UI and API are a validated application shell, not the completed
-assurance product. The next domain slice is identity, tenancy and RBAC, followed
-by system/context onboarding and durable telemetry acceptance.
+The current UI and API include the validated identity and tenancy foundation,
+not the completed assurance product. The next domain slice is system/context
+onboarding, followed by durable telemetry acceptance.
 
 ## Run locally or on the initial EC2 host
 
@@ -84,14 +82,25 @@ Prerequisites: Docker Engine 29+ with Compose 2.40+, 8 CPU cores, and 32 GB RAM.
 
 ```bash
 cp .env.example .env
-# Replace every placeholder password in .env before starting.
+# Replace every placeholder password and the identity session secret.
+# Keep HOLOSPAN_IDENTITY_COOKIE_SECURE=false only for local HTTP.
 docker compose up --build -d
 docker compose ps
 ```
 
 Open `http://HOST:8080`. Data-service ports bind to loopback; only the frontend
 port is public by default. For an internet-facing EC2 deployment, terminate TLS
-at an approved reverse proxy or load balancer and restrict the security group.
+at an approved reverse proxy or load balancer, set `HOLOSPAN_ENV=production`,
+set `HOLOSPAN_IDENTITY_COOKIE_SECURE=true`, and restrict the security group.
+
+OIDC remains fail-closed until the `HOLOSPAN_OIDC_*` settings are configured.
+The public UI then uses the backend login/callback flow; identity-provider tokens
+are not written to browser storage. Start the separately isolated, loopback-only
+platform edge only when administering tenant lifecycle metadata:
+
+```bash
+docker compose --profile platform-admin up -d platform-edge
+```
 
 ```bash
 make lint
