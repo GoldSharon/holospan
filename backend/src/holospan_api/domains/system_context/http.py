@@ -1,7 +1,7 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header, Query, Request, status
+from fastapi import APIRouter, Depends, File, Form, Header, Query, Request, UploadFile, status
 
 from holospan_api.core.contracts import Envelope
 from holospan_api.core.http import response_meta
@@ -12,13 +12,40 @@ from holospan_api.domains.identity_access.dependencies import (
 from holospan_api.domains.identity_access.service import AuthenticatedRequest, IdentityService
 from holospan_api.domains.system_context.contracts import (
     CreateSystemRequest,
+    SourceList,
+    SourceSummary,
     SystemList,
     SystemSummary,
 )
 from holospan_api.domains.system_context.dependencies import system_context_service
-from holospan_api.domains.system_context.service import SystemContextService
+from holospan_api.domains.system_context.models import SourceKind
+from holospan_api.domains.system_context.service import MAX_SOURCE_BYTES, SystemContextService
 
 router = APIRouter(prefix="/api/v1/system-context", tags=["system-context"])
+
+
+@router.get(
+    "/systems/{system_id}",
+    response_model=Envelope[SystemSummary],
+    summary="Get a system in the selected workspace",
+    responses={401: {"description": "Authentication required"}, 404: {"description": "Not found"}},
+)
+async def get_system(
+    request: Request,
+    system_id: UUID,
+    tenant_id: Annotated[UUID, Header(alias="X-Holospan-Tenant-ID")],
+    authenticated: Annotated[AuthenticatedRequest, Depends(current_tenant_request)],
+    service: Annotated[SystemContextService, Depends(system_context_service)],
+) -> Envelope[SystemSummary]:
+    return Envelope(
+        data=await service.get_system(
+            authenticated=authenticated,
+            tenant_id=tenant_id,
+            system_id=system_id,
+            request_id=request.state.request_id,
+        ),
+        meta=response_meta(request),
+    )
 
 
 @router.get(
@@ -78,6 +105,77 @@ async def create_system(
             authenticated=authenticated,
             tenant_id=tenant_id,
             request=body,
+            request_id=request.state.request_id,
+        ),
+        meta=response_meta(request),
+    )
+
+
+@router.get(
+    "/systems/{system_id}/sources",
+    response_model=Envelope[SourceList],
+    summary="List sources connected to a system",
+    responses={401: {"description": "Authentication required"}, 404: {"description": "Not found"}},
+)
+async def list_sources(
+    request: Request,
+    system_id: UUID,
+    tenant_id: Annotated[UUID, Header(alias="X-Holospan-Tenant-ID")],
+    authenticated: Annotated[AuthenticatedRequest, Depends(current_tenant_request)],
+    service: Annotated[SystemContextService, Depends(system_context_service)],
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+) -> Envelope[SourceList]:
+    return Envelope(
+        data=await service.list_sources(
+            authenticated=authenticated,
+            tenant_id=tenant_id,
+            system_id=system_id,
+            limit=limit,
+            request_id=request.state.request_id,
+        ),
+        meta=response_meta(request),
+    )
+
+
+@router.post(
+    "/systems/{system_id}/sources",
+    response_model=Envelope[SourceSummary],
+    status_code=status.HTTP_201_CREATED,
+    summary="Upload a text document or API contract",
+    responses={
+        401: {"description": "Authentication required"},
+        403: {"description": "Denied"},
+        404: {"description": "Not found"},
+        413: {"description": "Source too large"},
+        422: {"description": "Unsupported source"},
+        503: {"description": "Storage unavailable"},
+    },
+)
+async def create_source(
+    request: Request,
+    system_id: UUID,
+    tenant_id: Annotated[UUID, Header(alias="X-Holospan-Tenant-ID")],
+    authenticated: Annotated[AuthenticatedRequest, Depends(current_tenant_request)],
+    identities: Annotated[IdentityService, Depends(identity_service)],
+    service: Annotated[SystemContextService, Depends(system_context_service)],
+    kind: Annotated[SourceKind, Form()],
+    file: Annotated[UploadFile, File()],
+    csrf_header: Annotated[str | None, Header(alias="X-CSRF-Token")] = None,
+) -> Envelope[SourceSummary]:
+    await identities.verify_csrf(authenticated, csrf_header, request_id=request.state.request_id)
+    try:
+        content = await file.read(MAX_SOURCE_BYTES + 1)
+    finally:
+        await file.close()
+    return Envelope(
+        data=await service.create_source(
+            authenticated=authenticated,
+            tenant_id=tenant_id,
+            system_id=system_id,
+            kind=kind,
+            original_filename=file.filename or "",
+            declared_media_type=file.content_type or "application/octet-stream",
+            content=content,
             request_id=request.state.request_id,
         ),
         meta=response_meta(request),

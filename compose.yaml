@@ -44,6 +44,12 @@ services:
       HOLOSPAN_TENANT_DATABASE_URL: postgresql+asyncpg://${HOLOSPAN_TENANT_DB_USER:-holospan_tenant}:${HOLOSPAN_TENANT_DB_PASSWORD:?set the tenant runtime database password}@postgres:5432/${HOLOSPAN_POSTGRES_DB:-holospan}
       HOLOSPAN_CORS_ORIGINS: http://localhost:8080
       HOLOSPAN_DOCS_ENABLED: "true"
+      HOLOSPAN_OBJECT_STORAGE_ENDPOINT: ${HOLOSPAN_OBJECT_STORAGE_ENDPOINT:-minio:9000}
+      HOLOSPAN_OBJECT_STORAGE_ACCESS_KEY: ${HOLOSPAN_OBJECT_STORAGE_ACCESS_KEY:-holospan-admin}
+      HOLOSPAN_OBJECT_STORAGE_SECRET_KEY: ${HOLOSPAN_OBJECT_STORAGE_SECRET_KEY:?set the object storage application password}
+      HOLOSPAN_OBJECT_STORAGE_BUCKET: ${HOLOSPAN_OBJECT_STORAGE_BUCKET:-holospan-raw}
+      HOLOSPAN_OBJECT_STORAGE_SECURE: ${HOLOSPAN_OBJECT_STORAGE_SECURE:-false}
+      HOLOSPAN_OBJECT_STORAGE_REGION: ${HOLOSPAN_OBJECT_STORAGE_REGION:-us-east-1}
       HOLOSPAN_IDENTITY_SESSION_SECRET: ${HOLOSPAN_IDENTITY_SESSION_SECRET:?set a random identity session secret of at least 32 bytes}
       HOLOSPAN_IDENTITY_SESSION_SECONDS: ${HOLOSPAN_IDENTITY_SESSION_SECONDS:-3600}
       HOLOSPAN_IDENTITY_COOKIE_SECURE: ${HOLOSPAN_IDENTITY_COOKIE_SECURE:-false}
@@ -70,6 +76,8 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
+      minio:
+        condition: service_healthy
     ports:
       - "127.0.0.1:8000:8000"
     networks:

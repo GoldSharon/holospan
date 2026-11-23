@@ -24,6 +24,8 @@ def test_production_accepts_distinct_hosts_https_and_replaced_secret() -> None:
         platform_oidc_frontend_uri="https://platform.example/",
         tenant_app_host="tenant.example",
         platform_admin_host="platform.example",
+        object_storage_secret_key="this-is-a-replaced-object-storage-secret",  # noqa: S106
+        object_storage_secure=True,
     )
 
     assert settings.identity_cookie_secure

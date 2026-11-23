@@ -215,6 +215,88 @@ it('AC-3 submits a tenant-scoped system with CSRF and displays the result', asyn
   expect(await screen.findByText('Claims Copilot')).toBeInTheDocument()
 })
 
+it('opens system details and uploads an API contract as an additive source', async () => {
+  const tenantId = '019aca05-8233-7cc1-b2cc-9727fc367b6f'
+  const systemId = '019aca05-8233-7cc1-b2cc-9727fc367b70'
+  const system = {
+    id: systemId,
+    tenantId,
+    displayName: 'Claims Copilot',
+    slug: 'claims-copilot',
+    description: 'Assists claims reviewers.',
+    systemType: 'agent',
+    lifecycleStage: 'development',
+    status: 'draft',
+    createdBy: '019aca05-8233-7cc1-b2cc-9727fc367b6d',
+    createdAt: '2026-11-22T00:00:00Z',
+    updatedAt: '2026-11-22T00:00:00Z',
+  }
+  const source = {
+    id: '019aca05-8233-7cc1-b2cc-9727fc367b71',
+    systemId,
+    kind: 'api_contract',
+    originalFilename: 'openapi.yaml',
+    declaredMediaType: 'application/yaml',
+    detectedMediaType: 'application/yaml',
+    byteSize: 13,
+    sha256: 'a'.repeat(64),
+    status: 'stored',
+    createdBy: system.createdBy,
+    createdAt: '2026-11-23T00:00:00Z',
+  }
+  let sources: typeof source[] = []
+  const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+    if (url.endsWith('/oidc-config')) return Promise.resolve({ ok: true, json: () => Promise.resolve({ data: { enabled: true }, meta }) })
+    if (url.endsWith('/session')) return Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({
+        data: {
+          principal: { id: system.createdBy, email: 'user@example.com', displayName: 'Test User', status: 'active' },
+          memberships: [{
+            id: '019aca05-8233-7cc1-b2cc-9727fc367b6e', tenantId, tenantSlug: 'holospan-lab', tenantName: 'Holospan Lab', roles: ['tenant_admin'],
+            permissions: ['system_context.systems.read', 'system_context.systems.manage', 'system_context.sources.read', 'system_context.sources.manage'], status: 'active',
+          }],
+          platformRoles: [], platformPermissions: [], csrfToken: 'csrf-test-token', expiresAt: '2999-11-22T01:00:00Z',
+        },
+        meta,
+      }),
+    })
+    if (url.includes(`/systems/${systemId}/sources`) && init?.method === 'POST') {
+      expect(init.headers).toMatchObject({ 'X-Holospan-Tenant-ID': tenantId, 'X-CSRF-Token': 'csrf-test-token' })
+      expect(init.body).toBeInstanceOf(FormData)
+      sources = [source]
+      return Promise.resolve({ ok: true, status: 201, json: () => Promise.resolve({ data: source, meta }) })
+    }
+    if (url.includes(`/systems/${systemId}/sources`)) return Promise.resolve({ ok: true, json: () => Promise.resolve({ data: { items: sources }, meta }) })
+    if (url.endsWith(`/systems/${systemId}`)) return Promise.resolve({ ok: true, json: () => Promise.resolve({ data: system, meta }) })
+    if (url.includes('/system-context/systems')) return Promise.resolve({ ok: true, json: () => Promise.resolve({ data: { items: [system] }, meta }) })
+    return Promise.resolve({ ok: true, json: () => Promise.resolve({ data: { service: 'holospan-api', version: '0.1.0', deploymentMode: 'docker-compose', capabilities: [] }, meta }) })
+  })
+  vi.stubGlobal('fetch', fetchMock)
+
+  renderApp()
+  await screen.findByRole('heading', { name: /prove what your agents can safely do/i })
+  fireEvent.click(screen.getByRole('button', { name: 'Systems' }))
+  fireEvent.click(await screen.findByRole('button', { name: /open claims copilot/i }))
+
+  expect(await screen.findByRole('heading', { name: 'Claims Copilot' })).toBeInTheDocument()
+  expect(screen.getByText('Code repository')).toBeInTheDocument()
+  expect(screen.getByText('Context & contracts')).toBeInTheDocument()
+  expect(screen.getByText('Runtime endpoint')).toBeInTheDocument()
+  expect(screen.getByText('Telemetry')).toBeInTheDocument()
+  expect(screen.getAllByText('Planned')).toHaveLength(3)
+
+  fireEvent.click(screen.getByLabelText('API contract'))
+  fireEvent.change(screen.getByLabelText('Source file'), {
+    target: { files: [new File(['openapi: 3.1'], 'openapi.yaml', { type: 'application/yaml' })] },
+  })
+  fireEvent.click(screen.getByRole('button', { name: 'Upload source' }))
+
+  const inventory = screen.getByRole('region', { name: 'Connected sources' })
+  expect(await within(inventory).findByText('openapi.yaml')).toBeInTheDocument()
+})
+
 it('moves to sign-in as soon as the server-reported session has expired', async () => {
   const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL) => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url

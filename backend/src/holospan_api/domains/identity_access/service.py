@@ -296,7 +296,7 @@ class IdentityService:
                 )
             except AuthenticationFailed:
                 logger.warning("OIDC end-session discovery failed; local logout completed")
-        return LogoutResult(redirectUri=redirect_uri)
+        return LogoutResult(redirect_uri=redirect_uri)
 
     async def list_membership_tenants(
         self,

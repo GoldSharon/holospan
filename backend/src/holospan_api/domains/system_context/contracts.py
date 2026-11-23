@@ -5,6 +5,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from holospan_api.domains.system_context.models import (
     LifecycleStage,
+    SourceKind,
+    SourceStatus,
     SystemStatus,
     SystemType,
 )
@@ -58,3 +60,23 @@ class SystemSummary(BaseModel):
 
 class SystemList(BaseModel):
     items: list[SystemSummary]
+
+
+class SourceSummary(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, from_attributes=True)
+
+    id: UUID
+    system_id: UUID = Field(alias="systemId")
+    kind: SourceKind
+    original_filename: str = Field(alias="originalFilename")
+    declared_media_type: str = Field(alias="declaredMediaType")
+    detected_media_type: str = Field(alias="detectedMediaType")
+    byte_size: int = Field(alias="byteSize")
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    status: SourceStatus
+    created_by: UUID = Field(alias="createdBy")
+    created_at: datetime = Field(alias="createdAt")
+
+
+class SourceList(BaseModel):
+    items: list[SourceSummary]

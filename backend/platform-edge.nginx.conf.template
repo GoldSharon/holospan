@@ -2,7 +2,7 @@ server {
   listen 8081;
   server_name _;
   server_tokens off;
-  client_max_body_size 2m;
+  client_max_body_size 3m;
 
   location = /healthz {
     access_log off;

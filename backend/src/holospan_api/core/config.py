@@ -22,6 +22,14 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:5173,http://localhost:8080"
     docs_enabled: bool = True
     max_request_bytes: int = Field(default=2 * 1024 * 1024, ge=1024, le=10 * 1024 * 1024)
+    object_storage_endpoint: str = "localhost:9000"
+    object_storage_access_key: str = "holospan-admin"
+    object_storage_secret_key: SecretStr = SecretStr("development-only-object-storage-secret")
+    object_storage_bucket: str = "holospan-raw"
+    object_storage_secure: bool = False
+    object_storage_region: str = "us-east-1"
+    object_storage_connect_timeout_seconds: float = Field(default=3.0, ge=0.5, le=30.0)
+    object_storage_read_timeout_seconds: float = Field(default=10.0, ge=1.0, le=60.0)
     oidc_enabled: bool = False
     oidc_issuer: str | None = None
     oidc_discovery_url: str | None = None
@@ -69,6 +77,10 @@ class Settings(BaseSettings):
                 raise ValueError("production auth and tenant database pools must be distinct")
             if self.tenant_app_host == self.platform_admin_host:
                 raise ValueError("tenant and platform administration hosts must be distinct")
+            if self.object_storage_secret_key.get_secret_value().startswith("development-only"):
+                raise ValueError("production object storage secret must be replaced")
+            if not self.object_storage_secure:
+                raise ValueError("production object storage transport must use TLS")
             if self.oidc_enabled and (
                 self.oidc_client_secret is None
                 or not self.oidc_client_secret.get_secret_value()

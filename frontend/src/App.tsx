@@ -28,13 +28,17 @@ import {
   fetchCapabilities,
   fetchOidcConfig,
   fetchSession,
+  fetchSystem,
+  fetchSystemSources,
   fetchSystems,
   logout,
   SESSION_EXPIRED_EVENT,
+  uploadSystemSource,
   type CreateSystemInput,
   type Membership,
+  type SourceKind,
 } from './api'
-import { CreateSystemDialog, SystemsWorkspace } from './SystemWorkspace'
+import { CreateSystemDialog, SystemDetailWorkspace, SystemsWorkspace } from './SystemWorkspace'
 
 const navigation = [
   { id: 'overview', label: 'Overview', icon: Gauge },
@@ -241,11 +245,14 @@ function Dashboard() {
   const [activeSection, setActiveSection] = useState<SectionId>('overview')
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
+  const [selectedSystemId, setSelectedSystemId] = useState<string>()
   const memberships = useMemo(() => session.data?.data.memberships ?? [], [session.data])
   const activeTenantId = useMemo(() => selectedTenantId ?? memberships[0]?.tenantId, [memberships, selectedTenantId])
   const activeMembership = memberships.find((membership) => membership.tenantId === activeTenantId)
   const canReadSystems = Boolean(activeMembership?.permissions.includes('system_context.systems.read'))
   const canManageSystems = Boolean(activeMembership?.permissions.includes('system_context.systems.manage'))
+  const canReadSources = Boolean(activeMembership?.permissions.includes('system_context.sources.read'))
+  const canManageSources = Boolean(activeMembership?.permissions.includes('system_context.sources.manage'))
   const capabilities = useQuery({
     queryKey: ['system-capabilities', activeTenantId],
     queryFn: ({ signal }) => fetchCapabilities(signal, activeTenantId),
@@ -258,6 +265,24 @@ function Dashboard() {
     enabled: session.isSuccess && !sessionExpired && Boolean(activeTenantId) && canReadSystems,
     retry: false,
   })
+  const selectedSystem = useQuery({
+    queryKey: ['system', activeTenantId, selectedSystemId],
+    queryFn: ({ signal }) => {
+      if (!activeTenantId || !selectedSystemId) throw new Error('No active system')
+      return fetchSystem(activeTenantId, selectedSystemId, signal)
+    },
+    enabled: session.isSuccess && !sessionExpired && Boolean(activeTenantId && selectedSystemId) && canReadSystems,
+    retry: false,
+  })
+  const systemSources = useQuery({
+    queryKey: ['system-sources', activeTenantId, selectedSystemId],
+    queryFn: ({ signal }) => {
+      if (!activeTenantId || !selectedSystemId) throw new Error('No active system')
+      return fetchSystemSources(activeTenantId, selectedSystemId, signal)
+    },
+    enabled: session.isSuccess && !sessionExpired && Boolean(activeTenantId && selectedSystemId) && canReadSources,
+    retry: false,
+  })
   const closeCreateDialog = useCallback(() => {
     setCreateDialogOpen(false)
     window.requestAnimationFrame(() => document.getElementById('create-system-action')?.focus())
@@ -265,6 +290,7 @@ function Dashboard() {
   const openCreateDialog = useCallback(() => {
     if (!canManageSystems) return
     setActiveSection('systems')
+    setSelectedSystemId(undefined)
     setMobileNavOpen(false)
     setCreateDialogOpen(true)
   }, [canManageSystems])
@@ -276,6 +302,15 @@ function Dashboard() {
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['systems', activeTenantId] })
       closeCreateDialog()
+    },
+  })
+  const uploadSourceMutation = useMutation({
+    mutationFn: ({ kind, file }: { kind: SourceKind; file: File }) => {
+      if (!activeTenantId || !selectedSystemId || !session.data?.data.csrfToken) throw new Error('No active system')
+      return uploadSystemSource(activeTenantId, selectedSystemId, session.data.data.csrfToken, kind, file)
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['system-sources', activeTenantId, selectedSystemId] })
     },
   })
   const signOut = useMutation({
@@ -319,14 +354,16 @@ function Dashboard() {
 
   const identity = session.data.data.principal
   const availableCount = capabilities.data?.data.capabilities.filter((capability) => capability.status === 'available').length
-  const pageLabel = navigation.find((item) => item.id === activeSection)?.label ?? 'Overview'
+  const pageLabel = selectedSystem.data?.data.displayName ?? navigation.find((item) => item.id === activeSection)?.label ?? 'Overview'
   const selectSection = (section: SectionId) => {
     setActiveSection(section)
+    setSelectedSystemId(undefined)
     setMobileNavOpen(false)
   }
   const changeTenant = (tenantId: string) => {
     setSelectedTenantId(tenantId)
     setCreateDialogOpen(false)
+    setSelectedSystemId(undefined)
   }
 
   return (
@@ -375,15 +412,37 @@ function Dashboard() {
             />
           )}
           {activeSection === 'systems' && (
-            <SystemsWorkspace
-              systems={systems.data?.data.items ?? []}
-              isPending={systems.isPending}
-              isError={systems.isError}
-              canRead={canReadSystems}
-              canManage={canManageSystems}
-              onRetry={() => { void systems.refetch() }}
-              onOpenCreate={openCreateDialog}
-            />
+            selectedSystemId ? (
+              <SystemDetailWorkspace
+                system={selectedSystem.data?.data}
+                sources={systemSources.data?.data.items ?? []}
+                isSystemPending={selectedSystem.isPending}
+                isSystemError={selectedSystem.isError}
+                isSourcesPending={systemSources.isPending}
+                isSourcesError={systemSources.isError}
+                canReadSources={canReadSources}
+                canManageSources={canManageSources}
+                isUploadPending={uploadSourceMutation.isPending}
+                uploadError={uploadSourceMutation.error}
+                onBack={() => setSelectedSystemId(undefined)}
+                onRetrySystem={() => { void selectedSystem.refetch() }}
+                onRetrySources={() => { void systemSources.refetch() }}
+                onUpload={async (kind, file) => {
+                  await uploadSourceMutation.mutateAsync({ kind, file })
+                }}
+              />
+            ) : (
+              <SystemsWorkspace
+                systems={systems.data?.data.items ?? []}
+                isPending={systems.isPending}
+                isError={systems.isError}
+                canRead={canReadSystems}
+                canManage={canManageSystems}
+                onRetry={() => { void systems.refetch() }}
+                onOpenCreate={openCreateDialog}
+                onOpenSystem={setSelectedSystemId}
+              />
+            )
           )}
           {activeSection !== 'overview' && activeSection !== 'systems' && <PlannedSection section={activeSection} />}
         </main>

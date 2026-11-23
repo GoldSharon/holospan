@@ -11,7 +11,8 @@ docker run --rm -v "$repo_root:/src:ro" -w /src semgrep/semgrep:1.145.2 \
 docker run --rm -v "$repo_root:/repo:ro" zricethezav/gitleaks:v8.30.0 \
   detect --source /repo --no-git --config /repo/.gitleaks.toml --redact --exit-code 1
 
-docker run --rm -v "$repo_root:/repo:ro" aquasec/trivy:0.68.2 \
+docker run --rm -v "$repo_root:/repo:ro" -v holospan-trivy-cache:/root/.cache/trivy \
+  aquasec/trivy:0.68.2 \
   fs --scanners vuln,secret,misconfig --severity HIGH,CRITICAL --exit-code 1 \
   --skip-files /repo/.env.local-idp /repo
 

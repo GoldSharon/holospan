@@ -90,6 +90,30 @@ const systemEnvelopeSchema = z.object({
   meta: metaSchema,
 })
 
+const sourceSummarySchema = z.object({
+  id: z.string().uuid(),
+  systemId: z.string().uuid(),
+  kind: z.enum(['context_document', 'api_contract']),
+  originalFilename: z.string(),
+  declaredMediaType: z.string(),
+  detectedMediaType: z.string(),
+  byteSize: z.number().int().positive(),
+  sha256: z.string().regex(/^[0-9a-f]{64}$/),
+  status: z.literal('stored'),
+  createdBy: z.string().uuid(),
+  createdAt: z.string(),
+})
+
+const sourcesEnvelopeSchema = z.object({
+  data: z.object({ items: z.array(sourceSummarySchema) }),
+  meta: metaSchema,
+})
+
+const sourceEnvelopeSchema = z.object({
+  data: sourceSummarySchema,
+  meta: metaSchema,
+})
+
 const errorEnvelopeSchema = z.object({
   error: z.object({
     code: z.string(),
@@ -106,6 +130,10 @@ export type Membership = z.infer<typeof membershipSchema>
 export type SystemSummary = z.infer<typeof systemSummarySchema>
 export type SystemsEnvelope = z.infer<typeof systemsEnvelopeSchema>
 export type SystemEnvelope = z.infer<typeof systemEnvelopeSchema>
+export type SourceKind = z.infer<typeof sourceSummarySchema>['kind']
+export type SourceSummary = z.infer<typeof sourceSummarySchema>
+export type SourcesEnvelope = z.infer<typeof sourcesEnvelopeSchema>
+export type SourceEnvelope = z.infer<typeof sourceEnvelopeSchema>
 export type CreateSystemInput = {
   displayName: string
   slug: string
@@ -192,6 +220,61 @@ export async function fetchSystems(
     signal,
   })
   return parseResponse(response, systemsEnvelopeSchema)
+}
+
+export async function fetchSystem(
+  tenantId: string,
+  systemId: string,
+  signal?: AbortSignal,
+): Promise<SystemEnvelope> {
+  const response = await fetch(`/api/v1/system-context/systems/${systemId}`, {
+    credentials: 'same-origin',
+    headers: {
+      Accept: 'application/json',
+      'X-Holospan-Tenant-ID': tenantId,
+    },
+    signal,
+  })
+  return parseResponse(response, systemEnvelopeSchema)
+}
+
+export async function fetchSystemSources(
+  tenantId: string,
+  systemId: string,
+  signal?: AbortSignal,
+): Promise<SourcesEnvelope> {
+  const response = await fetch(`/api/v1/system-context/systems/${systemId}/sources?limit=50`, {
+    credentials: 'same-origin',
+    headers: {
+      Accept: 'application/json',
+      'X-Holospan-Tenant-ID': tenantId,
+    },
+    signal,
+  })
+  return parseResponse(response, sourcesEnvelopeSchema)
+}
+
+export async function uploadSystemSource(
+  tenantId: string,
+  systemId: string,
+  csrfToken: string,
+  kind: SourceKind,
+  file: File,
+): Promise<SourceEnvelope> {
+  const body = new FormData()
+  body.set('kind', kind)
+  body.set('file', file)
+  const response = await fetch(`/api/v1/system-context/systems/${systemId}/sources`, {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: {
+      Accept: 'application/json',
+      'X-Holospan-Tenant-ID': tenantId,
+      'X-CSRF-Token': csrfToken,
+    },
+    body,
+  })
+  return parseResponse(response, sourceEnvelopeSchema)
 }
 
 export async function createSystem(

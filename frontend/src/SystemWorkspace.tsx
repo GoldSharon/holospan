@@ -1,11 +1,14 @@
 import {
   AlertCircle,
+  ArrowLeft,
   Blocks,
   Bot,
   Braces,
   Check,
+  CheckCircle2,
   Cloud,
   FileText,
+  FileUp,
   GitBranch,
   Network,
   Plus,
@@ -19,7 +22,7 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 import { type FormEvent, type KeyboardEvent as ReactKeyboardEvent, useEffect, useRef, useState } from 'react'
-import { ApiError, type CreateSystemInput, type SystemSummary } from './api'
+import { ApiError, type CreateSystemInput, type SourceKind, type SourceSummary, type SystemSummary } from './api'
 
 const systemTypeLabels: Record<SystemSummary['systemType'], string> = {
   agent: 'AI agent',
@@ -334,6 +337,7 @@ export function SystemsWorkspace({
   canManage,
   onRetry,
   onOpenCreate,
+  onOpenSystem,
 }: {
   systems: SystemSummary[]
   isPending: boolean
@@ -342,6 +346,7 @@ export function SystemsWorkspace({
   canManage: boolean
   onRetry: () => void
   onOpenCreate: (invoker: HTMLButtonElement) => void
+  onOpenSystem: (systemId: string) => void
 }) {
   return (
     <section className="section-page" aria-labelledby="systems-title">
@@ -378,7 +383,13 @@ export function SystemsWorkspace({
       {canRead && !isPending && !isError && systems.length > 0 && (
         <div className="system-grid" aria-label="Systems">
           {systems.map((system) => (
-            <article className="system-card" key={system.id}>
+            <button
+              className="system-card system-card-action"
+              type="button"
+              aria-label={`Open ${system.displayName}`}
+              key={system.id}
+              onClick={() => onOpenSystem(system.id)}
+            >
               <div className="system-card-heading"><span className="system-icon"><Blocks size={18} aria-hidden="true" /></span><span className="status-badge">Draft</span></div>
               <h2>{system.displayName}</h2>
               <p>{system.description || 'No description added.'}</p>
@@ -387,10 +398,154 @@ export function SystemsWorkspace({
                 <div><dt>Stage</dt><dd>{lifecycleLabels[system.lifecycleStage]}</dd></div>
                 <div><dt>Connections</dt><dd>Not connected</dd></div>
               </dl>
-            </article>
+            </button>
           ))}
         </div>
       )}
+    </section>
+  )
+}
+
+const sourceKindLabels: Record<SourceKind, string> = {
+  context_document: 'Context document',
+  api_contract: 'API contract',
+}
+
+function formatBytes(value: number) {
+  if (value < 1024) return `${value} B`
+  return `${(value / 1024).toFixed(value < 10 * 1024 ? 1 : 0)} KB`
+}
+
+export function SystemDetailWorkspace({
+  system,
+  sources,
+  isSystemPending,
+  isSystemError,
+  isSourcesPending,
+  isSourcesError,
+  canReadSources,
+  canManageSources,
+  isUploadPending,
+  uploadError,
+  onBack,
+  onRetrySystem,
+  onRetrySources,
+  onUpload,
+}: {
+  system?: SystemSummary
+  sources: SourceSummary[]
+  isSystemPending: boolean
+  isSystemError: boolean
+  isSourcesPending: boolean
+  isSourcesError: boolean
+  canReadSources: boolean
+  canManageSources: boolean
+  isUploadPending: boolean
+  uploadError: Error | null
+  onBack: () => void
+  onRetrySystem: () => void
+  onRetrySources: () => void
+  onUpload: (kind: SourceKind, file: File) => Promise<void>
+}) {
+  const [kind, setKind] = useState<SourceKind>('context_document')
+  const [file, setFile] = useState<File | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  if (isSystemPending) {
+    return <section className="system-detail-page"><div className="empty-state" role="status">Loading system…</div></section>
+  }
+  if (isSystemError || !system) {
+    return (
+      <section className="system-detail-page">
+        <button className="back-button" type="button" onClick={onBack}><ArrowLeft size={16} aria-hidden="true" />All systems</button>
+        <div className="empty-state" role="alert"><AlertCircle size={24} aria-hidden="true" /><h1>System unavailable</h1><p>The workspace could not load this system.</p><button className="secondary-button" type="button" onClick={onRetrySystem}>Retry</button></div>
+      </section>
+    )
+  }
+
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!file) return
+    try {
+      await onUpload(kind, file)
+      setFile(null)
+      if (fileInputRef.current) fileInputRef.current.value = ''
+    } catch {
+      // The mutation error is rendered without discarding the selected file.
+    }
+  }
+
+  return (
+    <section className="system-detail-page" aria-labelledby="system-detail-title">
+      <button className="back-button" type="button" onClick={onBack}><ArrowLeft size={16} aria-hidden="true" />All systems</button>
+      <header className="system-detail-header">
+        <div>
+          <div className="system-detail-meta"><span>{systemTypeLabels[system.systemType]}</span><span>{lifecycleLabels[system.lifecycleStage]}</span><span>Draft</span></div>
+          <h1 id="system-detail-title">{system.displayName}</h1>
+          <p>{system.description || 'No description has been added for this system.'}</p>
+        </div>
+        <div className="system-identity-card"><span>System ID</span><code>{system.slug}</code><small>Evidence and runs remain linked to this identity.</small></div>
+      </header>
+
+      <div className="source-section-heading">
+        <div><p className="section-kicker">Source coverage</p><h2>Connect what you already have</h2><p>Sources are additive. Use any combination of context, code, runtime behavior, and telemetry.</p></div>
+        <span className="source-count">{sources.length} connected</span>
+      </div>
+
+      <div className="source-category-grid" aria-label="Source categories">
+        <article className="source-category source-category-planned"><span className="source-category-icon"><GitBranch size={18} aria-hidden="true" /></span><div><h3>Code repository</h3><p>GitHub and Azure Repos connections.</p></div><span className="planned-badge">Planned</span></article>
+        <article className="source-category source-category-ready"><span className="source-category-icon"><FileText size={18} aria-hidden="true" /></span><div><h3>Context &amp; contracts</h3><p>Requirements, policies, and API specifications.</p></div><span className="available-badge">Available</span></article>
+        <article className="source-category source-category-planned"><span className="source-category-icon"><Network size={18} aria-hidden="true" /></span><div><h3>Runtime endpoint</h3><p>Agent and API behavior connections.</p></div><span className="planned-badge">Planned</span></article>
+        <article className="source-category source-category-planned"><span className="source-category-icon"><RadioTower size={18} aria-hidden="true" /></span><div><h3>Telemetry</h3><p>OTLP and OpenInference traces.</p></div><span className="planned-badge">Planned</span></article>
+      </div>
+
+      <div className="source-workspace-grid">
+        <form className="source-upload-panel" onSubmit={(event) => { void submit(event) }}>
+          <div className="source-panel-heading"><span className="source-category-icon"><FileUp size={18} aria-hidden="true" /></span><div><h2>Add context</h2><p>Upload a UTF-8 text file up to 2 MiB. Files are stored without executing or interpreting them.</p></div></div>
+          <fieldset className="source-kind-options">
+            <legend>Source type</legend>
+            {(Object.keys(sourceKindLabels) as SourceKind[]).map((value) => (
+              <label className={kind === value ? 'source-kind-selected' : ''} key={value}>
+                <input type="radio" name="sourceKind" value={value} checked={kind === value} onChange={() => setKind(value)} />
+                <span>{sourceKindLabels[value]}</span>
+              </label>
+            ))}
+          </fieldset>
+          <label className="source-file-field">
+            <span>Source file</span>
+            <input
+              ref={fileInputRef}
+              type="file"
+              aria-label="Source file"
+              accept=".txt,.md,.json,.yaml,.yml,text/plain,text/markdown,application/json,application/yaml"
+              disabled={!canManageSources || isUploadPending}
+              onChange={(event) => setFile(event.target.files?.[0] ?? null)}
+            />
+            <small>Accepted: TXT, Markdown, JSON, YAML. Binary and executable files are rejected.</small>
+          </label>
+          {file && <div className="upload-file-summary"><FileText size={16} aria-hidden="true" /><span><strong>{file.name}</strong><small>{formatBytes(file.size)}</small></span></div>}
+          {uploadError && <div className="form-error" role="alert"><AlertCircle size={17} aria-hidden="true" /><span>{uploadError instanceof ApiError ? uploadError.message : 'The source could not be uploaded. Try again.'}</span></div>}
+          {!canManageSources && <p className="source-permission-note">You have read-only access to sources.</p>}
+          <button className="primary-button source-upload-action" type="submit" disabled={!file || !canManageSources || isUploadPending}>
+            {isUploadPending ? 'Uploading…' : 'Upload source'}
+          </button>
+        </form>
+
+        <section className="source-inventory" aria-labelledby="source-inventory-title">
+          <div className="source-inventory-heading"><div><h2 id="source-inventory-title">Connected sources</h2><p>Stored artifacts remain attributable to this system.</p></div><span>{sources.length}</span></div>
+          {!canReadSources && <div className="source-empty"><p>Source read access is not assigned.</p></div>}
+          {canReadSources && isSourcesPending && <div className="source-empty" role="status"><p>Loading sources…</p></div>}
+          {canReadSources && isSourcesError && <div className="source-empty" role="alert"><p>Sources are temporarily unavailable.</p><button className="secondary-button" type="button" onClick={onRetrySources}>Retry</button></div>}
+          {canReadSources && !isSourcesPending && !isSourcesError && sources.length === 0 && <div className="source-empty"><Cloud size={22} aria-hidden="true" /><p>No sources connected yet.</p><span>Start with a requirement, policy, or API contract.</span></div>}
+          {canReadSources && !isSourcesPending && !isSourcesError && sources.length > 0 && (
+            <ul className="source-list">
+              {sources.map((source) => (
+                <li key={source.id}><span className="source-list-icon"><FileText size={17} aria-hidden="true" /></span><div><strong>{source.originalFilename}</strong><small>{sourceKindLabels[source.kind]} · {formatBytes(source.byteSize)}</small></div><span className="stored-state"><CheckCircle2 size={13} aria-hidden="true" />Stored</span></li>
+              ))}
+            </ul>
+          )}
+        </section>
+      </div>
     </section>
   )
 }
