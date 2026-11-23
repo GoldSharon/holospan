@@ -46,6 +46,13 @@ class SessionContext(BaseModel):
     platform_permissions: list[str] = Field(alias="platformPermissions")
     selected_tenant_id: UUID | None = Field(default=None, alias="selectedTenantId")
     csrf_token: str = Field(alias="csrfToken")
+    expires_at: datetime = Field(alias="expiresAt")
+
+
+class LogoutResult(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    redirect_uri: str = Field(alias="redirectUri")
 
 
 class InitialAdmin(BaseModel):

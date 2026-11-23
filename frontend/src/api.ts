@@ -56,7 +56,13 @@ const sessionEnvelopeSchema = z.object({
     platformPermissions: z.array(z.string()),
     selectedTenantId: z.string().uuid().optional().nullable(),
     csrfToken: z.string().min(1),
+    expiresAt: z.string().datetime({ offset: true }),
   }),
+  meta: metaSchema,
+})
+
+const logoutEnvelopeSchema = z.object({
+  data: z.object({ redirectUri: z.string().min(1) }),
   meta: metaSchema,
 })
 
@@ -95,6 +101,7 @@ const errorEnvelopeSchema = z.object({
 export type CapabilitiesEnvelope = z.infer<typeof capabilitiesEnvelopeSchema>
 export type OidcConfigEnvelope = z.infer<typeof oidcConfigEnvelopeSchema>
 export type SessionEnvelope = z.infer<typeof sessionEnvelopeSchema>
+export type LogoutEnvelope = z.infer<typeof logoutEnvelopeSchema>
 export type Membership = z.infer<typeof membershipSchema>
 export type SystemSummary = z.infer<typeof systemSummarySchema>
 export type SystemsEnvelope = z.infer<typeof systemsEnvelopeSchema>
@@ -118,7 +125,16 @@ export class ApiError extends Error {
   }
 }
 
+export const SESSION_EXPIRED_EVENT = 'holospan:session-expired'
+
+function notifySessionExpired(response: Response) {
+  if (response.status === 401 && typeof window !== 'undefined') {
+    window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT))
+  }
+}
+
 async function parseResponse<T>(response: Response, schema: z.ZodType<T>): Promise<T> {
+  if (!response.ok) notifySessionExpired(response)
   const body: unknown = await response.json()
   if (!response.ok) {
     const parsed = errorEnvelopeSchema.safeParse(body)
@@ -197,19 +213,11 @@ export async function createSystem(
   return parseResponse(response, systemEnvelopeSchema)
 }
 
-export async function logout(csrfToken: string): Promise<void> {
+export async function logout(): Promise<LogoutEnvelope> {
   const response = await fetch('/api/v1/identity-access/session', {
     method: 'DELETE',
     credentials: 'same-origin',
-    headers: { 'X-CSRF-Token': csrfToken },
+    headers: { Accept: 'application/json' },
   })
-  if (!response.ok) {
-    const body: unknown = await response.json()
-    const parsed = errorEnvelopeSchema.safeParse(body)
-    throw new ApiError(
-      response.status,
-      parsed.success ? parsed.data.error.code : 'LOGOUT_FAILED',
-      parsed.success ? parsed.data.error.message : 'Sign out failed.',
-    )
-  }
+  return parseResponse(response, logoutEnvelopeSchema)
 }

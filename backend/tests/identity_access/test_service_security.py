@@ -1,7 +1,9 @@
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
+from sqlalchemy.exc import SQLAlchemyError
 
 from holospan_api.core.config import Settings
 from holospan_api.domains.identity_access.authorization import Actor, Plane
@@ -17,6 +19,7 @@ from holospan_api.domains.identity_access.service import AuthenticatedRequest, I
 def make_service() -> IdentityService:
     auth_session = MagicMock()
     auth_session.commit = AsyncMock()
+    auth_session.rollback = AsyncMock()
     tenant_session = MagicMock()
     tenant_session.commit = AsyncMock()
     tenant_session.rollback = AsyncMock()
@@ -59,8 +62,41 @@ def authenticated_request(*, plane: Plane, tenant_id: object | None = None) -> A
         platformPermissions=[],
         selectedTenantId=selected,
         csrfToken="csrf",
+        expiresAt=datetime(2026, 11, 22, 1, tzinfo=UTC),
     )
     return AuthenticatedRequest(actor=actor, context=context)
+
+
+async def test_logout_revokes_an_expired_browser_session_and_ends_oidc_session() -> None:
+    service = make_service()
+    provider = MagicMock()
+    provider.end_session_url = AsyncMock(return_value="https://tenant-id.example/logout")
+    service.providers[Plane.TENANT] = provider
+    service.repository.revoke_session_token = AsyncMock(return_value=True)
+
+    result = await service.logout(
+        plane=Plane.TENANT,
+        session_token="expired-session",  # noqa: S106
+    )
+
+    service.repository.revoke_session_token.assert_awaited_once()
+    service.session.commit.assert_awaited_once()
+    assert result.redirect_uri == "https://tenant-id.example/logout"
+
+
+async def test_logout_still_returns_to_the_frontend_when_revocation_storage_is_down() -> None:
+    service = make_service()
+    service.repository.revoke_session_token = AsyncMock(
+        side_effect=SQLAlchemyError("identity storage unavailable")
+    )
+
+    result = await service.logout(
+        plane=Plane.TENANT,
+        session_token="expired-session",  # noqa: S106
+    )
+
+    service.session.rollback.assert_awaited_once()
+    assert result.redirect_uri == service.settings.oidc_frontend_uri
 
 
 async def test_selected_tenant_mismatch_is_audited_before_denial() -> None:

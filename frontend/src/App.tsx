@@ -21,7 +21,7 @@ import {
   Waypoints,
   X,
 } from 'lucide-react'
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   ApiError,
   createSystem,
@@ -30,6 +30,7 @@ import {
   fetchSession,
   fetchSystems,
   logout,
+  SESSION_EXPIRED_EVENT,
   type CreateSystemInput,
   type Membership,
 } from './api'
@@ -95,15 +96,17 @@ function initials(name?: string | null, email?: string | null) {
     .join('')
 }
 
-function AccessScreen({ configured, unavailable }: { configured: boolean; unavailable?: boolean }) {
+function AccessScreen({ configured, unavailable, expired }: { configured: boolean; unavailable?: boolean; expired?: boolean }) {
   return (
     <main className="access-shell">
       <section className="access-card" aria-labelledby="access-title">
         <div className="brand-mark access-mark" aria-hidden="true"><Orbit size={25} /></div>
         <p className="eyebrow"><ShieldCheck size={14} aria-hidden="true" /> Protected assurance workspace</p>
-        <h1 id="access-title">{configured ? 'Sign in to Holospan.' : 'Connect your identity provider.'}</h1>
+        <h1 id="access-title">{expired ? 'Your session expired.' : configured ? 'Sign in to Holospan.' : 'Connect your identity provider.'}</h1>
         <p className="access-copy">
-          {configured
+          {expired
+            ? 'For your security, this workspace was locked. Sign in again to continue.'
+            : configured
             ? 'Use your organization’s single sign-on to enter the assurance workspace.'
             : 'Identity is intentionally fail-closed. An administrator must configure organizational sign-on before customer evidence can be accessed.'}
         </p>
@@ -122,7 +125,6 @@ function AccessScreen({ configured, unavailable }: { configured: boolean; unavai
             </div>
           </div>
         )}
-        <p className="access-footnote">Secure session · protected sign-in · tenant-isolated access</p>
       </section>
     </main>
   )
@@ -234,6 +236,7 @@ function Overview({
 function Dashboard() {
   const queryClient = useQueryClient()
   const session = useQuery({ queryKey: ['identity-session'], queryFn: ({ signal }) => fetchSession(signal), retry: false })
+  const [sessionExpired, setSessionExpired] = useState(false)
   const [selectedTenantId, setSelectedTenantId] = useState<string>()
   const [activeSection, setActiveSection] = useState<SectionId>('overview')
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
@@ -246,13 +249,13 @@ function Dashboard() {
   const capabilities = useQuery({
     queryKey: ['system-capabilities', activeTenantId],
     queryFn: ({ signal }) => fetchCapabilities(signal, activeTenantId),
-    enabled: session.isSuccess,
+    enabled: session.isSuccess && !sessionExpired,
     retry: false,
   })
   const systems = useQuery({
     queryKey: ['systems', activeTenantId],
     queryFn: ({ signal }) => fetchSystems(activeTenantId, signal),
-    enabled: session.isSuccess && Boolean(activeTenantId) && canReadSystems,
+    enabled: session.isSuccess && !sessionExpired && Boolean(activeTenantId) && canReadSystems,
     retry: false,
   })
   const closeCreateDialog = useCallback(() => {
@@ -276,12 +279,33 @@ function Dashboard() {
     },
   })
   const signOut = useMutation({
-    mutationFn: async () => logout(session.data?.data.csrfToken ?? ''),
-    onSuccess: () => {
+    mutationFn: logout,
+    onSuccess: (result) => {
       queryClient.clear()
-      window.location.assign('/')
+      window.location.assign(result.data.redirectUri)
     },
   })
+
+  useEffect(() => {
+    const expireSession = () => {
+      setSessionExpired(true)
+      void queryClient.cancelQueries()
+    }
+    window.addEventListener(SESSION_EXPIRED_EVENT, expireSession)
+
+    const expiresAt = session.data?.data.expiresAt
+    const delay = expiresAt ? Date.parse(expiresAt) - Date.now() : undefined
+    const timer = delay === undefined
+      ? undefined
+      : window.setTimeout(expireSession, Math.min(Math.max(0, delay), 2_147_483_647))
+
+    return () => {
+      window.removeEventListener(SESSION_EXPIRED_EVENT, expireSession)
+      if (timer !== undefined) window.clearTimeout(timer)
+    }
+  }, [queryClient, session.data?.data.expiresAt])
+
+  if (sessionExpired) return <AccessScreen configured expired />
 
   if (session.isPending) {
     return <main className="access-shell"><p className="loading-state" role="status">Verifying secure session…</p></main>
@@ -335,6 +359,7 @@ function Dashboard() {
             <span className={`api-state ${capabilities.isError ? 'api-state-error' : ''}`}><span className="status-dot" aria-hidden="true" />{capabilities.isPending && 'Connecting'}{capabilities.isSuccess && 'Service available'}{capabilities.isError && 'Service unavailable'}</span>
             <span className="signed-in-user" title={identity.email ?? undefined}><span className="avatar">{initials(identity.displayName, identity.email)}</span><span>{identity.displayName || identity.email || 'Signed in'}</span></span>
             <button className="secondary-button" type="button" disabled={signOut.isPending} onClick={() => signOut.mutate()}><LogOut size={15} aria-hidden="true" />{signOut.isPending ? 'Signing out…' : 'Sign out'}</button>
+            {signOut.isError && <span className="signout-error" role="alert">Sign out failed. Try again.</span>}
           </div>
         </header>
 

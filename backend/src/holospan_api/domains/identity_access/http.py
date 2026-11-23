@@ -1,4 +1,6 @@
+import hashlib
 from typing import Annotated
+from urllib.parse import parse_qs, urlsplit
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, Path, Query, Request, Response
@@ -11,6 +13,7 @@ from holospan_api.domains.identity_access.authorization import Actor, Plane
 from holospan_api.domains.identity_access.contracts import (
     CreateTenantRequest,
     CursorPage,
+    LogoutResult,
     MemberSummary,
     OidcClientConfig,
     ReplaceMemberRolesRequest,
@@ -43,9 +46,21 @@ DEPENDENCY_ERROR = {"model": ErrorEnvelope, "description": "Identity storage is 
 CONFLICT_ERROR = {"model": ErrorEnvelope, "description": "The requested state conflicts."}
 
 
-def _set_transaction_cookie(response: Response, value: str) -> None:
+def _transaction_cookie_name(state: str) -> str:
+    state_digest = hashlib.sha256(state.encode()).hexdigest()
+    return cookie_name(f"{LOGIN_TRANSACTION_COOKIE}_{state_digest}")
+
+
+def _authorization_state(location: str) -> str:
+    states = parse_qs(urlsplit(location).query).get("state", [])
+    if len(states) != 1 or not states[0]:
+        raise RuntimeError("OIDC authorization URL is missing its transaction state")
+    return states[0]
+
+
+def _set_transaction_cookie(response: Response, value: str, *, state: str) -> None:
     response.set_cookie(
-        cookie_name(LOGIN_TRANSACTION_COOKIE),
+        _transaction_cookie_name(state),
         value,
         max_age=300,
         secure=get_settings().identity_cookie_secure,
@@ -55,14 +70,27 @@ def _set_transaction_cookie(response: Response, value: str) -> None:
     )
 
 
-def _clear_transaction_cookie(response: Response) -> None:
+def _delete_transaction_cookie(response: Response, name: str) -> None:
     response.delete_cookie(
-        cookie_name(LOGIN_TRANSACTION_COOKIE),
+        name,
         secure=get_settings().identity_cookie_secure,
         httponly=True,
         samesite="lax",
         path="/",
     )
+
+
+def _clear_transaction_cookie(response: Response, *, state: str) -> None:
+    _delete_transaction_cookie(response, _transaction_cookie_name(state))
+    _delete_transaction_cookie(response, cookie_name(LOGIN_TRANSACTION_COOKIE))
+
+
+def _clear_transaction_cookies(response: Response, request: Request) -> None:
+    legacy_name = cookie_name(LOGIN_TRANSACTION_COOKIE)
+    state_prefix = f"{legacy_name}_"
+    for name in request.cookies:
+        if name == legacy_name or name.startswith(state_prefix):
+            _delete_transaction_cookie(response, name)
 
 
 def _set_session_cookies(
@@ -149,7 +177,7 @@ async def tenant_login(
 ) -> RedirectResponse:
     location, transaction = await service.begin_login(Plane.TENANT)
     response = RedirectResponse(location, status_code=302)
-    _set_transaction_cookie(response, transaction)
+    _set_transaction_cookie(response, transaction, state=_authorization_state(location))
     return response
 
 
@@ -171,11 +199,14 @@ async def tenant_callback(
         plane=Plane.TENANT,
         code=code,
         state=state,
-        transaction_cookie=request.cookies.get(cookie_name(LOGIN_TRANSACTION_COOKIE)),
+        transaction_cookie=(
+            request.cookies.get(_transaction_cookie_name(state))
+            or request.cookies.get(cookie_name(LOGIN_TRANSACTION_COOKIE))
+        ),
         request_id=request.state.request_id,
     )
     response = RedirectResponse(service.configuration(Plane.TENANT).frontend_uri, status_code=302)
-    _clear_transaction_cookie(response)
+    _clear_transaction_cookie(response, state=state)
     _set_session_cookies(
         response,
         plane=Plane.TENANT,
@@ -322,23 +353,26 @@ async def replace_tenant_member_roles(
 
 @tenant_router.delete(
     "/session",
-    status_code=204,
+    response_model=Envelope[LogoutResult],
     summary="Revoke the tenant session",
-    description="Revokes the current tenant session after session-bound CSRF validation.",
-    responses={401: AUTH_ERROR, 403: DENIAL_ERROR, 503: DEPENDENCY_ERROR},
+    description=(
+        "Idempotently clears the local browser session and returns the upstream OIDC "
+        "end-session destination when the provider publishes one."
+    ),
+    responses={503: DEPENDENCY_ERROR},
 )
 async def tenant_logout(
     request: Request,
     response: Response,
-    authenticated: Annotated[AuthenticatedRequest, Depends(current_tenant_request)],
     service: Annotated[IdentityService, Depends(identity_service)],
-    csrf_header: Annotated[str | None, Header(alias="X-CSRF-Token")] = None,
-) -> None:
-    await service.verify_csrf(
-        authenticated, csrf_header, request_id=request.state.request_id
+) -> Envelope[LogoutResult]:
+    result = await service.logout(
+        plane=Plane.TENANT,
+        session_token=request.cookies.get(cookie_name(TENANT_SESSION_COOKIE)),
     )
-    await service.logout(authenticated)
     _clear_session_cookies(response, Plane.TENANT)
+    _clear_transaction_cookies(response, request)
+    return Envelope(data=result, meta=response_meta(request))
 
 
 @platform_router.get(
@@ -372,7 +406,7 @@ async def platform_login(
     await _require_platform_host(request, service)
     location, transaction = await service.begin_login(Plane.PLATFORM)
     response = RedirectResponse(location, status_code=302)
-    _set_transaction_cookie(response, transaction)
+    _set_transaction_cookie(response, transaction, state=_authorization_state(location))
     return response
 
 
@@ -399,11 +433,14 @@ async def platform_callback(
         plane=Plane.PLATFORM,
         code=code,
         state=state,
-        transaction_cookie=request.cookies.get(cookie_name(LOGIN_TRANSACTION_COOKIE)),
+        transaction_cookie=(
+            request.cookies.get(_transaction_cookie_name(state))
+            or request.cookies.get(cookie_name(LOGIN_TRANSACTION_COOKIE))
+        ),
         request_id=request.state.request_id,
     )
     response = RedirectResponse(service.configuration(Plane.PLATFORM).frontend_uri, status_code=302)
-    _clear_transaction_cookie(response)
+    _clear_transaction_cookie(response, state=state)
     _set_session_cookies(
         response,
         plane=Plane.PLATFORM,
@@ -432,24 +469,27 @@ async def platform_session(
 
 @platform_router.delete(
     "/session",
-    status_code=204,
+    response_model=Envelope[LogoutResult],
     summary="Revoke the platform session",
-    description="Revokes the isolated platform session after CSRF and host validation.",
-    responses={401: AUTH_ERROR, 403: DENIAL_ERROR, 503: DEPENDENCY_ERROR},
+    description=(
+        "Idempotently clears the isolated platform session and returns the upstream OIDC "
+        "end-session destination."
+    ),
+    responses={403: DENIAL_ERROR, 503: DEPENDENCY_ERROR},
 )
 async def platform_logout(
     request: Request,
     response: Response,
-    authenticated: Annotated[AuthenticatedRequest, Depends(current_platform_request)],
     service: Annotated[IdentityService, Depends(identity_service)],
-    csrf_header: Annotated[str | None, Header(alias="X-CSRF-Token")] = None,
-) -> None:
-    await _require_platform_host(request, service, authenticated.actor)
-    await service.verify_csrf(
-        authenticated, csrf_header, request_id=request.state.request_id
+) -> Envelope[LogoutResult]:
+    await _require_platform_host(request, service)
+    result = await service.logout(
+        plane=Plane.PLATFORM,
+        session_token=request.cookies.get(cookie_name(PLATFORM_SESSION_COOKIE)),
     )
-    await service.logout(authenticated)
     _clear_session_cookies(response, Plane.PLATFORM)
+    _clear_transaction_cookies(response, request)
+    return Envelope(data=result, meta=response_meta(request))
 
 
 @platform_router.get(

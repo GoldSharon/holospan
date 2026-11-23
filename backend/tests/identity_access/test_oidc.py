@@ -13,6 +13,7 @@ from holospan_api.domains.identity_access.oidc import (
     LoginTransactionCodec,
     OidcProvider,
     build_authorization_url,
+    build_end_session_url,
 )
 
 
@@ -32,6 +33,19 @@ def test_ac11_authorization_url_uses_code_pkce_state_and_nonce() -> None:
     assert "code_challenge=" in url
     assert f"state={transaction.state}" in url
     assert f"nonce={transaction.nonce}" in url
+
+
+def test_end_session_url_uses_registered_redirect_and_client_id() -> None:
+    url = build_end_session_url(
+        end_session_endpoint="https://id.example/logout",
+        client_id="holospan-web",
+        post_logout_redirect_uri="https://app.example/",
+    )
+
+    assert url == (
+        "https://id.example/logout?client_id=holospan-web&"
+        "post_logout_redirect_uri=https%3A%2F%2Fapp.example%2F"
+    )
 
 
 def test_transaction_cookie_is_encrypted_and_tamper_evident() -> None:
@@ -72,6 +86,7 @@ async def test_ac1_provider_validates_fixed_issuer_audience_nonce_and_signature(
                     "authorization_endpoint": "https://id.example/authorize",
                     "token_endpoint": "https://id.example/token",
                     "jwks_uri": "https://id.example/jwks",
+                    "end_session_endpoint": "https://id.example/logout",
                 },
             )
         return httpx.Response(200, json={"keys": [public_jwk]})
@@ -106,6 +121,10 @@ async def test_ac1_provider_validates_fixed_issuer_audience_nonce_and_signature(
         "https://id.example/.well-known/openid-configuration",
         "https://id.example/jwks",
     ]
+    assert await provider.end_session_url("https://app.example/") == (
+        "https://id.example/logout?client_id=holospan-web&"
+        "post_logout_redirect_uri=https%3A%2F%2Fapp.example%2F"
+    )
 
 
 async def test_provider_supports_internal_discovery_without_weakening_fixed_issuer() -> None:

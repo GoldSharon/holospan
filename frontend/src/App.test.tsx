@@ -11,6 +11,7 @@ function renderApp() {
 
 afterEach(() => {
   vi.unstubAllGlobals()
+  window.history.replaceState({}, '', '/')
 })
 
 it('fails closed with setup guidance when OIDC is not configured', async () => {
@@ -70,6 +71,7 @@ it('renders the protected workspace after session verification', async () => {
             platformRoles: [],
             platformPermissions: [],
             csrfToken: 'csrf-test-token',
+            expiresAt: '2999-11-22T01:00:00Z',
           },
           meta,
         }),
@@ -122,6 +124,7 @@ it('AC-1 AC-2 AC-8 makes navigation and create-system controls functional withou
             platformRoles: [],
             platformPermissions: [],
             csrfToken: 'csrf-test-token',
+            expiresAt: '2999-11-22T01:00:00Z',
           },
           meta,
         }),
@@ -185,7 +188,7 @@ it('AC-3 submits a tenant-scoped system with CSRF and displays the result', asyn
         data: {
           principal: { id: created.createdBy, email: 'user@example.com', displayName: 'Test User', status: 'active' },
           memberships: [{ id: '019aca05-8233-7cc1-b2cc-9727fc367b6e', tenantId, tenantSlug: 'holospan-lab', tenantName: 'Holospan Lab', roles: ['tenant_admin'], permissions: ['system_context.systems.read', 'system_context.systems.manage'], status: 'active' }],
-          platformRoles: [], platformPermissions: [], csrfToken: 'csrf-test-token',
+          platformRoles: [], platformPermissions: [], csrfToken: 'csrf-test-token', expiresAt: '2999-11-22T01:00:00Z',
         },
         meta,
       }),
@@ -210,4 +213,110 @@ it('AC-3 submits a tenant-scoped system with CSRF and displays the result', asyn
 
   await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
   expect(await screen.findByText('Claims Copilot')).toBeInTheDocument()
+})
+
+it('moves to sign-in as soon as the server-reported session has expired', async () => {
+  const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+    if (url.endsWith('/oidc-config')) {
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({ data: { enabled: true }, meta }) })
+    }
+    if (url.endsWith('/session')) {
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({
+          data: {
+            principal: { id: '019aca05-8233-7cc1-b2cc-9727fc367b6d', email: 'user@example.com', displayName: 'Test User', status: 'active' },
+            memberships: [],
+            platformRoles: [],
+            platformPermissions: [],
+            csrfToken: 'expired-csrf-token',
+            expiresAt: '2000-01-01T00:00:00Z',
+          },
+          meta,
+        }),
+      })
+    }
+    return Promise.resolve({ ok: true, json: () => Promise.resolve({ data: { service: 'holospan-api', version: '0.1.0', deploymentMode: 'docker-compose', capabilities: [] }, meta }) })
+  })
+  vi.stubGlobal('fetch', fetchMock)
+
+  renderApp()
+
+  expect(await screen.findByRole('heading', { name: /your session expired/i })).toBeInTheDocument()
+  expect(screen.queryByText('Test User')).not.toBeInTheDocument()
+})
+
+it('locks the workspace when a protected API reports that the session is no longer valid', async () => {
+  const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+    if (url.endsWith('/oidc-config')) {
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({ data: { enabled: true }, meta }) })
+    }
+    if (url.endsWith('/session')) {
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({
+          data: {
+            principal: { id: '019aca05-8233-7cc1-b2cc-9727fc367b6d', email: 'user@example.com', displayName: 'Test User', status: 'active' },
+            memberships: [],
+            platformRoles: [],
+            platformPermissions: [],
+            csrfToken: 'csrf-test-token',
+            expiresAt: '2999-11-22T01:00:00Z',
+          },
+          meta,
+        }),
+      })
+    }
+    return Promise.resolve({
+      ok: false,
+      status: 401,
+      json: () => Promise.resolve({ error: { code: 'AUTHENTICATION_REQUIRED', message: 'Authentication is required.' } }),
+    })
+  })
+  vi.stubGlobal('fetch', fetchMock)
+
+  renderApp()
+
+  expect(await screen.findByRole('heading', { name: /your session expired/i })).toBeInTheDocument()
+})
+
+it('signs out locally and follows the identity-provider logout redirect', async () => {
+  const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+    if (url.endsWith('/oidc-config')) {
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({ data: { enabled: true }, meta }) })
+    }
+    if (url.endsWith('/session') && init?.method === 'DELETE') {
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({ data: { redirectUri: '#signed-out' }, meta }) })
+    }
+    if (url.endsWith('/session')) {
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({
+          data: {
+            principal: { id: '019aca05-8233-7cc1-b2cc-9727fc367b6d', email: 'user@example.com', displayName: 'Test User', status: 'active' },
+            memberships: [],
+            platformRoles: [],
+            platformPermissions: [],
+            csrfToken: 'csrf-test-token',
+            expiresAt: '2999-11-22T01:00:00Z',
+          },
+          meta,
+        }),
+      })
+    }
+    return Promise.resolve({ ok: true, json: () => Promise.resolve({ data: { service: 'holospan-api', version: '0.1.0', deploymentMode: 'docker-compose', capabilities: [] }, meta }) })
+  })
+  vi.stubGlobal('fetch', fetchMock)
+
+  renderApp()
+  fireEvent.click(await screen.findByRole('button', { name: /sign out/i }))
+
+  await waitFor(() => expect(window.location.hash).toBe('#signed-out'))
+  expect(fetchMock).toHaveBeenCalledWith(
+    '/api/v1/identity-access/session',
+    expect.objectContaining({ method: 'DELETE', credentials: 'same-origin' }),
+  )
 })

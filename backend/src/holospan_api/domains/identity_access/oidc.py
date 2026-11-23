@@ -26,6 +26,21 @@ def _pkce_challenge(verifier: str) -> str:
     return base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
 
 
+def build_end_session_url(
+    *,
+    end_session_endpoint: str,
+    client_id: str,
+    post_logout_redirect_uri: str,
+) -> str:
+    query = urlencode(
+        {
+            "client_id": client_id,
+            "post_logout_redirect_uri": post_logout_redirect_uri,
+        }
+    )
+    return f"{end_session_endpoint}?{query}"
+
+
 @dataclass(frozen=True, slots=True)
 class LoginTransaction:
     state: str
@@ -125,6 +140,7 @@ class OidcMetadata:
     authorization_endpoint: str
     token_endpoint: str
     jwks_uri: str
+    end_session_endpoint: str | None
 
 
 class OidcProvider:
@@ -181,6 +197,11 @@ class OidcProvider:
                 authorization_endpoint=str(body["authorization_endpoint"]),
                 token_endpoint=str(body["token_endpoint"]),
                 jwks_uri=str(body["jwks_uri"]),
+                end_session_endpoint=(
+                    str(body["end_session_endpoint"])
+                    if body.get("end_session_endpoint")
+                    else None
+                ),
             )
         except (httpx.HTTPError, KeyError, TypeError, ValueError) as exc:
             raise AuthenticationFailed from exc
@@ -191,8 +212,9 @@ class OidcProvider:
             metadata.authorization_endpoint,
             metadata.token_endpoint,
             metadata.jwks_uri,
+            metadata.end_session_endpoint,
         ):
-            if urlsplit(endpoint).scheme not in allowed_schemes:
+            if endpoint is not None and urlsplit(endpoint).scheme not in allowed_schemes:
                 raise AuthenticationFailed
         self._metadata = (now + self.cache_seconds, metadata)
         return metadata
@@ -219,6 +241,16 @@ class OidcProvider:
 
     async def authorization_endpoint(self) -> str:
         return (await self.metadata()).authorization_endpoint
+
+    async def end_session_url(self, post_logout_redirect_uri: str) -> str | None:
+        endpoint = (await self.metadata()).end_session_endpoint
+        if endpoint is None:
+            return None
+        return build_end_session_url(
+            end_session_endpoint=endpoint,
+            client_id=self.client_id,
+            post_logout_redirect_uri=post_logout_redirect_uri,
+        )
 
     async def exchange_code(
         self,

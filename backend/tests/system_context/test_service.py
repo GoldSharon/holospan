@@ -35,6 +35,7 @@ def authenticated_request(tenant_id: object) -> AuthenticatedRequest:
             platformPermissions=[],
             selectedTenantId=tenant_id,
             csrfToken="csrf",
+            expiresAt="2026-11-22T01:00:00Z",
         ),
     )
 

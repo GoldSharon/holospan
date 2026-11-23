@@ -1,8 +1,9 @@
+import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from holospan_api.core.config import Settings
@@ -16,6 +17,7 @@ from holospan_api.domains.identity_access.bootstrap import BootstrapAllowlist
 from holospan_api.domains.identity_access.contracts import (
     CreateTenantRequest,
     CursorPage,
+    LogoutResult,
     MemberSummary,
     OidcClientConfig,
     SessionContext,
@@ -41,6 +43,8 @@ from holospan_api.domains.identity_access.pagination import (
     RepositoryPage,
 )
 from holospan_api.domains.identity_access.repository import IdentityRepository, IssuedSession
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -261,10 +265,38 @@ class IdentityService:
             tenant_id=tenant_id,
         )
 
-    async def logout(self, request: AuthenticatedRequest) -> None:
-        if request.actor.session_id is not None:
-            await self.repository.revoke_session(request.actor.session_id, now=datetime.now(UTC))
-            await self.session.commit()
+    async def logout(self, *, plane: Plane, session_token: str | None) -> LogoutResult:
+        """End the local browser session and the upstream OIDC session when available.
+
+        Local cleanup is intentionally idempotent and does not require the session to still be
+        active. A persistence outage must not trap a user inside the browser session; the opaque
+        cookie is still cleared by the HTTP boundary and the failed revocation remains visible in
+        server logs until the short-lived session expires naturally.
+        """
+        if session_token:
+            try:
+                revoked = await self.repository.revoke_session_token(
+                    session_token=session_token,
+                    plane=plane,
+                    now=datetime.now(UTC),
+                )
+                if revoked:
+                    await self.session.commit()
+            except SQLAlchemyError:
+                await self.session.rollback()
+                logger.exception("Unable to persist browser-session revocation during logout")
+
+        config = self.configuration(plane)
+        redirect_uri = config.frontend_uri
+        provider = self.providers[plane]
+        if provider is not None:
+            try:
+                redirect_uri = (
+                    await provider.end_session_url(config.frontend_uri) or redirect_uri
+                )
+            except AuthenticationFailed:
+                logger.warning("OIDC end-session discovery failed; local logout completed")
+        return LogoutResult(redirectUri=redirect_uri)
 
     async def list_membership_tenants(
         self,

@@ -184,6 +184,7 @@ class IdentityRepository:
                 "platformPermissions": platform_permissions,
                 "selectedTenantId": selected_tenant_id,
                 "csrfToken": csrf_token,
+                "expiresAt": browser_session.expires_at,
             }
         )
         return ResolvedIdentity(actor, principal, browser_session, context)
@@ -267,6 +268,26 @@ class IdentityRepository:
         browser_session = await self.session.get(BrowserSession, session_id)
         if browser_session is not None:
             browser_session.revoked_at = now
+
+    async def revoke_session_token(
+        self,
+        *,
+        session_token: str,
+        plane: Plane,
+        now: datetime,
+    ) -> bool:
+        """Revoke a browser session even when its absolute lifetime has elapsed."""
+        browser_session = await self.session.scalar(
+            select(BrowserSession).where(
+                BrowserSession.token_digest == token_digest(session_token),
+                BrowserSession.plane == SessionPlane(plane.value),
+            )
+        )
+        if browser_session is None:
+            return False
+        if browser_session.revoked_at is None:
+            browser_session.revoked_at = now
+        return True
 
     async def csrf_matches(self, session_id: UUID, csrf_token: str) -> bool:
         digest = await self.session.scalar(
