@@ -1,0 +1,409 @@
+{
+  "tools": [
+    {
+      "name": "read_evidence_segments",
+      "purpose": "Read bounded, tenant-authorized evidence segments already pinned to an assurance-generation run",
+      "category": "data",
+      "inputs": [
+        {
+          "name": "run_id",
+          "type": "string",
+          "description": "Assurance-generation run UUID supplied by the workflow controller",
+          "required": true,
+          "min_length": 36,
+          "max_length": 36
+        },
+        {
+          "name": "source_id",
+          "type": "string",
+          "description": "Pinned immutable source UUID belonging to the run manifest",
+          "required": true,
+          "min_length": 36,
+          "max_length": 36
+        },
+        {
+          "name": "cursor",
+          "type": "string",
+          "description": "Opaque continuation cursor returned by the prior call",
+          "required": false,
+          "max_length": 512
+        },
+        {
+          "name": "max_characters",
+          "type": "integer",
+          "description": "Maximum evidence characters to return",
+          "required": false,
+          "default": 12000,
+          "minimum": 1000,
+          "maximum": 20000
+        }
+      ],
+      "outputs": [
+        {
+          "name": "segments",
+          "type": "array",
+          "description": "Bounded evidence segments with immutable citations"
+        },
+        {
+          "name": "next_cursor",
+          "type": "string",
+          "description": "Opaque cursor for the next bounded page"
+        },
+        {
+          "name": "manifest_sha256",
+          "type": "string",
+          "description": "Hash of the run source manifest"
+        }
+      ],
+      "error_conditions": [
+        "Run not found or not authorized",
+        "Source not pinned to run",
+        "Source quarantined",
+        "Cursor invalid or expired",
+        "Read budget exhausted",
+        "Object storage unavailable"
+      ],
+      "side_effects": [
+        "Records a content-free access audit event",
+        "Consumes the run read budget"
+      ],
+      "idempotent": true,
+      "rate_limits": {
+        "requests_per_minute": 60,
+        "requests_per_hour": 1000,
+        "burst_limit": 10
+      },
+      "dependencies": [
+        "system-context authorization",
+        "PostgreSQL run manifest",
+        "S3-compatible object storage",
+        "redaction service"
+      ],
+      "examples": [
+        {
+          "description": "Read the first bounded page from a pinned requirements source",
+          "input": {
+            "run_id": "11111111-1111-4111-8111-111111111111",
+            "source_id": "22222222-2222-4222-8222-222222222222",
+            "max_characters": 12000
+          },
+          "expected_output": {
+            "segments": [],
+            "next_cursor": "opaque-cursor",
+            "manifest_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        }
+      ],
+      "security_requirements": [
+        "Controller-injected tenant scope",
+        "Pinned source allowlist",
+        "Read-only access",
+        "Prompt-injection delimiters",
+        "Sensitive-data redaction",
+        "No internal object key in response"
+      ]
+    },
+    {
+      "name": "load_upstream_artifact",
+      "purpose": "Load one validated and version-pinned upstream workflow artifact for the current run",
+      "category": "data",
+      "inputs": [
+        {
+          "name": "run_id",
+          "type": "string",
+          "description": "Assurance-generation run UUID",
+          "required": true,
+          "min_length": 36,
+          "max_length": 36
+        },
+        {
+          "name": "artifact_id",
+          "type": "string",
+          "description": "Artifact UUID allowed by the current stage handoff",
+          "required": true,
+          "min_length": 36,
+          "max_length": 36
+        },
+        {
+          "name": "artifact_sha256",
+          "type": "string",
+          "description": "Expected lowercase SHA-256 of the artifact",
+          "required": true,
+          "min_length": 64,
+          "max_length": 64
+        }
+      ],
+      "outputs": [
+        {
+          "name": "artifact",
+          "type": "object",
+          "description": "Schema-validated upstream artifact"
+        },
+        {
+          "name": "schema_version",
+          "type": "string",
+          "description": "Pinned artifact schema version"
+        }
+      ],
+      "error_conditions": [
+        "Artifact not found or not authorized",
+        "Artifact not allowed for current stage",
+        "Hash mismatch",
+        "Schema version unsupported"
+      ],
+      "side_effects": [
+        "Records a content-free access audit event"
+      ],
+      "idempotent": true,
+      "rate_limits": {
+        "requests_per_minute": 120,
+        "requests_per_hour": 2000,
+        "burst_limit": 20
+      },
+      "dependencies": [
+        "workflow authorization",
+        "PostgreSQL artifact metadata",
+        "S3-compatible object storage"
+      ],
+      "examples": [
+        {
+          "description": "Load an approved context snapshot pinned by its hash",
+          "input": {
+            "run_id": "11111111-1111-4111-8111-111111111111",
+            "artifact_id": "33333333-3333-4333-8333-333333333333",
+            "artifact_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          },
+          "expected_output": {
+            "artifact": {},
+            "schema_version": "1.0"
+          }
+        }
+      ],
+      "security_requirements": [
+        "Controller-injected tenant and stage scope",
+        "Artifact allowlist",
+        "Hash verification",
+        "No hidden prompts or credentials"
+      ]
+    },
+    {
+      "name": "submit_stage_candidate",
+      "purpose": "Submit one schema-bounded candidate artifact to the deterministic workflow controller for validation and draft persistence",
+      "category": "data",
+      "inputs": [
+        {
+          "name": "run_id",
+          "type": "string",
+          "description": "Assurance-generation run UUID",
+          "required": true,
+          "min_length": 36,
+          "max_length": 36
+        },
+        {
+          "name": "stage_id",
+          "type": "string",
+          "description": "Controller-issued stage identifier",
+          "required": true,
+          "min_length": 1,
+          "max_length": 64
+        },
+        {
+          "name": "attempt",
+          "type": "integer",
+          "description": "Controller-issued attempt number",
+          "required": true,
+          "minimum": 1,
+          "maximum": 3
+        },
+        {
+          "name": "schema_version",
+          "type": "string",
+          "description": "Expected output schema version",
+          "required": true,
+          "min_length": 1,
+          "max_length": 32
+        },
+        {
+          "name": "candidate",
+          "type": "object",
+          "description": "Structured candidate matching the stage output schema",
+          "required": true
+        },
+        {
+          "name": "idempotency_key",
+          "type": "string",
+          "description": "Controller-issued idempotency key",
+          "required": true,
+          "min_length": 16,
+          "max_length": 128
+        }
+      ],
+      "outputs": [
+        {
+          "name": "accepted",
+          "type": "boolean",
+          "description": "Whether validation and draft persistence succeeded"
+        },
+        {
+          "name": "artifact_id",
+          "type": "string",
+          "description": "Persisted draft artifact UUID when accepted"
+        },
+        {
+          "name": "artifact_sha256",
+          "type": "string",
+          "description": "Canonical artifact hash when accepted"
+        },
+        {
+          "name": "validation_errors",
+          "type": "array",
+          "description": "Machine-readable validation failures"
+        }
+      ],
+      "error_conditions": [
+        "Run or stage not authorized",
+        "Attempt or idempotency key mismatch",
+        "Schema validation failed",
+        "Budget exhausted",
+        "Persistence unavailable"
+      ],
+      "side_effects": [
+        "May create one immutable draft artifact",
+        "Updates stage budget and audit metadata",
+        "May enqueue the next stage only after validation"
+      ],
+      "idempotent": true,
+      "rate_limits": {
+        "requests_per_minute": 30,
+        "requests_per_hour": 500,
+        "burst_limit": 5
+      },
+      "dependencies": [
+        "workflow state machine",
+        "schema registry",
+        "PostgreSQL",
+        "S3-compatible object storage",
+        "transactional outbox"
+      ],
+      "examples": [
+        {
+          "description": "Submit a discovery claim set for deterministic validation",
+          "input": {
+            "run_id": "11111111-1111-4111-8111-111111111111",
+            "stage_id": "discovery",
+            "attempt": 1,
+            "schema_version": "1.0",
+            "candidate": {},
+            "idempotency_key": "run-11111111-discovery-1"
+          },
+          "expected_output": {
+            "accepted": true,
+            "artifact_id": "44444444-4444-4444-8444-444444444444",
+            "artifact_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            "validation_errors": []
+          }
+        }
+      ],
+      "security_requirements": [
+        "Controller-injected tenant scope",
+        "Strict additional-properties rejection",
+        "Citation and content-policy validation",
+        "No direct publication",
+        "No raw chain-of-thought storage"
+      ]
+    },
+    {
+      "name": "request_artifact_review",
+      "purpose": "Create a human review task for a validated context snapshot or scenario bundle",
+      "category": "communication",
+      "inputs": [
+        {
+          "name": "run_id",
+          "type": "string",
+          "description": "Assurance-generation run UUID",
+          "required": true,
+          "min_length": 36,
+          "max_length": 36
+        },
+        {
+          "name": "artifact_id",
+          "type": "string",
+          "description": "Validated draft artifact UUID",
+          "required": true,
+          "min_length": 36,
+          "max_length": 36
+        },
+        {
+          "name": "review_type",
+          "type": "string",
+          "description": "Required review gate",
+          "required": true,
+          "enum": ["context_snapshot", "scenario_bundle", "budget_override", "high_risk_adversarial"]
+        },
+        {
+          "name": "summary",
+          "type": "string",
+          "description": "Content-safe review summary",
+          "required": true,
+          "min_length": 1,
+          "max_length": 2000
+        }
+      ],
+      "outputs": [
+        {
+          "name": "review_id",
+          "type": "string",
+          "description": "Created review-task UUID"
+        },
+        {
+          "name": "status",
+          "type": "string",
+          "description": "Review status"
+        }
+      ],
+      "error_conditions": [
+        "Artifact not validated",
+        "Review already open",
+        "Run or artifact not authorized",
+        "Review service unavailable"
+      ],
+      "side_effects": [
+        "Creates one idempotent human review task",
+        "Pauses the workflow at the review gate",
+        "Records a content-free audit event"
+      ],
+      "idempotent": true,
+      "rate_limits": {
+        "requests_per_minute": 10,
+        "requests_per_hour": 100,
+        "burst_limit": 2
+      },
+      "dependencies": [
+        "workflow state machine",
+        "review queue",
+        "audit outbox"
+      ],
+      "examples": [
+        {
+          "description": "Pause a run for context-snapshot review",
+          "input": {
+            "run_id": "11111111-1111-4111-8111-111111111111",
+            "artifact_id": "33333333-3333-4333-8333-333333333333",
+            "review_type": "context_snapshot",
+            "summary": "Context snapshot passed automated provenance and invention gates."
+          },
+          "expected_output": {
+            "review_id": "55555555-5555-4555-8555-555555555555",
+            "status": "pending"
+          }
+        }
+      ],
+      "security_requirements": [
+        "Controller-injected tenant scope",
+        "Validated-artifact requirement",
+        "No automatic approval",
+        "No evidence content in notification"
+      ]
+    }
+  ]
+}

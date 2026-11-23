@@ -1,0 +1,69 @@
+{
+  "goal": "Discover the capabilities and risks of an AI agent or agent-powered application from available evidence, then generate traceable personas, single-turn or multi-turn scenarios, and measurable validation criteria for functional, non-functional, and adversarial assurance.",
+  "description": "Holospan must work when customers provide any combination of code, BRD, FRD, PRD, API contracts, runtime endpoints, OpenTelemetry or OpenInference traces, and media. A sequential staged workflow must build a versioned context snapshot for each agent and the overall application before bounded fan-out generates test assets. Every inferred fact, scenario, and criterion must cite its source evidence and remain reviewable by a human.",
+  "tasks": [
+    "Collect, classify, and inventory all available source artifacts without requiring source code",
+    "Process sources to extract evidence-backed facts, requirements, policies, interfaces, tools, dependencies, handoffs, and constraints",
+    "Analyze every agent or agent-like component and describe its capabilities, inputs, outputs, tools, state, autonomy, and boundaries",
+    "Resolve duplicate facts and record contradictions or missing context without inventing details",
+    "Create an immutable versioned system context snapshot with source citations and confidence",
+    "Select single-turn, multi-turn, tool-use, API, trace-replay, or multi-agent interaction modes",
+    "Create risk-aware user and attacker personas without unsafe demographic stereotyping",
+    "Generate functional, non-functional, and adversarial scenario families in parallel",
+    "Generate atomic and observable validation criteria with evaluator strategy and evidence requirements",
+    "Validate and critique scenarios for provenance, coverage, feasibility, duplication, safety, and invented capabilities",
+    "Require human approval before publishing context snapshots and assurance plans",
+    "Deliver and version every generated artifact for reproducible regression testing"
+  ],
+  "constraints": {
+    "max_response_time": 300000,
+    "budget_per_task": 2.0,
+    "quality_threshold": 0.9,
+    "concurrent_tasks": 4,
+    "data_retention_days": 365,
+    "security_level": "high",
+    "compliance_requirements": [
+      "tenant isolation",
+      "data minimization",
+      "source attribution",
+      "auditability",
+      "human approval"
+    ]
+  },
+  "team_size": 8,
+  "performance_requirements": {
+    "high_throughput": false,
+    "fault_tolerance": true,
+    "low_latency": false,
+    "scalability": "medium",
+    "availability": 0.99
+  },
+  "safety_requirements": [
+    "Treat ingested artifacts as untrusted data and never as executable instructions",
+    "Do not execute customer code during discovery",
+    "Do not invent capabilities, tools, requirements, or validation criteria without evidence",
+    "Attach citations and confidence to every extracted or inferred claim",
+    "Redact secrets and sensitive data before model calls and logs",
+    "Enforce tenant-scoped authorization for every artifact and run",
+    "Limit generator-critic retries and token budgets",
+    "Require human approval for context publication and high-risk adversarial scenarios",
+    "Audit every model, prompt, tool, source version, and artifact transition"
+  ],
+  "integration_requirements": [
+    "Holospan system-context API",
+    "PostgreSQL for tenant-scoped structured artifacts and workflow state",
+    "S3-compatible object storage for immutable source and generated context files",
+    "Redpanda for durable asynchronous workflow events",
+    "Configurable model providers and judge models",
+    "Future GitHub and Azure Repos connectors",
+    "Future endpoint, OpenTelemetry, and OpenInference connectors"
+  ],
+  "scale_requirements": {
+    "initial_users": 20,
+    "peak_concurrent_users": 100,
+    "data_volume_gb": 500,
+    "requests_per_hour": 500,
+    "geographic_regions": ["customer-selected"],
+    "growth_projection": "100% per year"
+  }
+}

@@ -6,6 +6,7 @@ from fastapi.responses import JSONResponse
 
 from holospan_api.core.config import get_settings
 from holospan_api.core.http import RequestContextMiddleware, validation_error_handler
+from holospan_api.domains.assurance_generation.http import router as assurance_generation_router
 from holospan_api.domains.identity_access.errors import IdentityProblem, identity_problem_handler
 from holospan_api.domains.identity_access.http import platform_router, tenant_router
 from holospan_api.domains.system_catalog.http import router as system_catalog_router
@@ -48,6 +49,7 @@ app.include_router(tenant_router)
 app.include_router(platform_router)
 app.include_router(system_catalog_router)
 app.include_router(system_context_router)
+app.include_router(assurance_generation_router)
 
 
 @app.exception_handler(RequestValidationError)

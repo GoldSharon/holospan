@@ -164,6 +164,7 @@ class SourceRecord(Base):
     )
 
     __table_args__ = (
+        UniqueConstraint("tenant_id", "id", name="uq_system_context_source_tenant_id"),
         ForeignKeyConstraint(
             ["tenant_id", "system_id"],
             ["system_context_systems.tenant_id", "system_context_systems.id"],

@@ -34,8 +34,8 @@ services:
 
   backend:
     build:
-      context: ./backend
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: backend/Dockerfile
     image: holospan/backend:0.1.0
     restart: unless-stopped
     environment:
@@ -48,6 +48,7 @@ services:
       HOLOSPAN_OBJECT_STORAGE_ACCESS_KEY: ${HOLOSPAN_OBJECT_STORAGE_ACCESS_KEY:-holospan-admin}
       HOLOSPAN_OBJECT_STORAGE_SECRET_KEY: ${HOLOSPAN_OBJECT_STORAGE_SECRET_KEY:?set the object storage application password}
       HOLOSPAN_OBJECT_STORAGE_BUCKET: ${HOLOSPAN_OBJECT_STORAGE_BUCKET:-holospan-raw}
+      HOLOSPAN_ASSURANCE_CONTEXT_BUCKET: ${HOLOSPAN_ASSURANCE_CONTEXT_BUCKET:-holospan-evidence}
       HOLOSPAN_OBJECT_STORAGE_SECURE: ${HOLOSPAN_OBJECT_STORAGE_SECURE:-false}
       HOLOSPAN_OBJECT_STORAGE_REGION: ${HOLOSPAN_OBJECT_STORAGE_REGION:-us-east-1}
       HOLOSPAN_IDENTITY_SESSION_SECRET: ${HOLOSPAN_IDENTITY_SESSION_SECRET:?set a random identity session secret of at least 32 bytes}
@@ -136,8 +137,8 @@ services:
 
   migrate:
     build:
-      context: ./backend
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: backend/Dockerfile
     image: holospan/backend:0.1.0
     command: ["alembic", "upgrade", "head"]
     restart: "no"

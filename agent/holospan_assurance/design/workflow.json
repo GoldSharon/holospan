@@ -1,0 +1,211 @@
+{
+  "name": "holospan-assurance-design",
+  "version": "0.1.0",
+  "pattern": "pipeline_with_bounded_fan_out_and_evaluator_gates",
+  "controller": {
+    "type": "deterministic_state_machine",
+    "owns": [
+      "authorization",
+      "tenant_scope",
+      "source_pinning",
+      "workflow_state",
+      "budgets",
+      "retries",
+      "schema_validation",
+      "persistence",
+      "human_gates",
+      "publication"
+    ],
+    "model_may_not": [
+      "select_tenant",
+      "authorize_access",
+      "execute_customer_code",
+      "commit_transactions",
+      "approve_artifacts",
+      "publish_artifacts",
+      "change_budget_limits"
+    ]
+  },
+  "stages": [
+    {
+      "id": "pin_sources",
+      "executor": "controller",
+      "mode": "sequential",
+      "input": "source_selection",
+      "output": "source_manifest",
+      "next": "discover"
+    },
+    {
+      "id": "discover",
+      "executor": "discovery_agent",
+      "mode": "map_over_sources",
+      "max_concurrency": 4,
+      "input": "source_manifest",
+      "output": "discovery_claim_sets",
+      "next": "synthesize_context"
+    },
+    {
+      "id": "synthesize_context",
+      "executor": "context_synthesizer_agent",
+      "mode": "sequential",
+      "input": "discovery_claim_sets",
+      "output": "context_snapshot_candidate",
+      "next": "criticize_context"
+    },
+    {
+      "id": "criticize_context",
+      "executor": "context_critic_agent",
+      "mode": "evaluator",
+      "input": "context_snapshot_candidate",
+      "output": "context_critique",
+      "pass_threshold": 0.9,
+      "non_compensable_gates": [
+        "schema_valid",
+        "tenant_attribution_valid",
+        "all_published_claims_cited",
+        "no_invented_capabilities"
+      ],
+      "revision_target": "synthesize_context",
+      "max_revisions": 2,
+      "next": "review_context"
+    },
+    {
+      "id": "review_context",
+      "executor": "human_reviewer",
+      "mode": "approval_gate",
+      "input": "context_snapshot_candidate",
+      "approved_output": "approved_context_snapshot",
+      "rejected_output": "context_review_comments",
+      "next": "plan_interactions"
+    },
+    {
+      "id": "plan_interactions",
+      "executor": "interaction_planner_agent",
+      "mode": "sequential",
+      "input": "approved_context_snapshot",
+      "output": "scenario_plan",
+      "next": "design_personas"
+    },
+    {
+      "id": "design_personas",
+      "executor": "persona_designer_agent",
+      "mode": "sequential",
+      "input": "scenario_plan",
+      "output": "persona_library",
+      "next": "generate_scenarios"
+    },
+    {
+      "id": "generate_scenarios",
+      "executor": [
+        "functional_scenario_agent",
+        "non_functional_scenario_agent",
+        "adversarial_scenario_agent"
+      ],
+      "mode": "bounded_fan_out",
+      "max_concurrency": 3,
+      "input": [
+        "approved_context_snapshot",
+        "scenario_plan",
+        "persona_library"
+      ],
+      "output": "scenario_candidates",
+      "next": "design_validation"
+    },
+    {
+      "id": "design_validation",
+      "executor": "validation_criteria_agent",
+      "mode": "map_over_scenarios",
+      "max_concurrency": 4,
+      "input": "scenario_candidates",
+      "output": "scenario_candidates_with_criteria",
+      "next": "criticize_scenarios"
+    },
+    {
+      "id": "criticize_scenarios",
+      "executor": "scenario_critic_agent",
+      "mode": "evaluator",
+      "input": "scenario_candidates_with_criteria",
+      "output": "scenario_bundle_candidate",
+      "pass_threshold": 0.9,
+      "non_compensable_gates": [
+        "schema_valid",
+        "all_scenarios_cited",
+        "no_invented_capabilities",
+        "criteria_observable",
+        "authorized_adversarial_scope"
+      ],
+      "revision_target": "generate_scenarios",
+      "max_revisions": 2,
+      "next": "review_scenarios"
+    },
+    {
+      "id": "review_scenarios",
+      "executor": "human_reviewer",
+      "mode": "approval_gate",
+      "input": "scenario_bundle_candidate",
+      "approved_output": "approved_scenario_bundle",
+      "rejected_output": "scenario_review_comments",
+      "next": "publish"
+    },
+    {
+      "id": "publish",
+      "executor": "controller",
+      "mode": "sequential",
+      "input": "approved_scenario_bundle",
+      "output": "published_assurance_plan",
+      "next": null
+    }
+  ],
+  "handoff_contract": {
+    "required": [
+      "workflow_id",
+      "tenant_id",
+      "system_id",
+      "run_id",
+      "stage_id",
+      "attempt",
+      "task",
+      "constraints",
+      "upstream_artifact_ids",
+      "source_manifest_hash",
+      "schema_version",
+      "prompt_version",
+      "policy_version",
+      "budget_tokens",
+      "budget_cost",
+      "timeout_seconds",
+      "idempotency_key"
+    ],
+    "forbid_inline": [
+      "full_source_documents",
+      "credentials",
+      "session_tokens",
+      "hidden_chain_of_thought",
+      "cross_tenant_identifiers"
+    ]
+  },
+  "retry": {
+    "provider_max_attempts": 2,
+    "critic_max_revisions": 2,
+    "backoff": "exponential_with_jitter",
+    "retryable": [
+      "provider_timeout",
+      "provider_rate_limit",
+      "temporary_storage_unavailable"
+    ],
+    "non_retryable": [
+      "authorization_failed",
+      "tenant_scope_mismatch",
+      "source_hash_mismatch",
+      "hard_budget_exhausted",
+      "policy_violation"
+    ]
+  },
+  "default_budgets": {
+    "max_source_characters_per_call": 20000,
+    "max_concurrent_model_calls": 4,
+    "max_stage_seconds": 120,
+    "max_workflow_seconds_excluding_review": 300,
+    "hard_cost_requires_configuration": true
+  }
+}

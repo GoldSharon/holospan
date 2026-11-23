@@ -114,6 +114,88 @@ const sourceEnvelopeSchema = z.object({
   meta: metaSchema,
 })
 
+const evidenceCitationSchema = z.object({
+  source_id: z.string().uuid(),
+  locator: z.string(),
+  content_sha256: z.string().regex(/^[0-9a-f]{64}$/),
+})
+
+const contextClaimSchema = z.object({
+  subject_key: z.string(),
+  claim_type: z.string(),
+  value: z.unknown(),
+  status: z.enum(['supported', 'conflicting', 'unknown', 'rejected']),
+  confidence: z.number().min(0).max(1),
+  extraction_method: z.enum(['deterministic', 'model', 'human']),
+  citations: z.array(evidenceCitationSchema),
+})
+
+const componentContextSchema = z.object({
+  key: z.string(),
+  display_name: z.string(),
+  purpose: z.string().optional().nullable(),
+  capabilities: z.array(z.string()),
+  inputs: z.array(z.string()),
+  outputs: z.array(z.string()),
+  tools: z.array(z.string()),
+  dependencies: z.array(z.string()),
+  policies: z.array(z.string()),
+})
+
+const contextGapSchema = z.object({
+  code: z.string(),
+  message: z.string(),
+  source_id: z.string().uuid().optional().nullable(),
+  locator: z.string().optional().nullable(),
+})
+
+const contextContentSchema = z.object({
+  tenant_id: z.string().uuid(),
+  system_id: z.string().uuid(),
+  source_manifest_sha256: z.string().regex(/^[0-9a-f]{64}$/),
+  system_name: z.string(),
+  status: z.literal('draft'),
+  schema_version: z.literal('1.0'),
+  claims: z.array(contextClaimSchema),
+  components: z.array(componentContextSchema),
+  gaps: z.array(contextGapSchema),
+  generator: z.literal('deterministic_discovery_v1'),
+  content_sha256: z.string().regex(/^[0-9a-f]{64}$/),
+})
+
+const contextSnapshotSchema = z.object({
+  id: z.string().uuid(),
+  systemId: z.string().uuid(),
+  version: z.number().int().positive(),
+  rowVersion: z.number().int().positive(),
+  status: z.enum(['draft', 'approved', 'rejected', 'revoked']),
+  sha256: z.string().regex(/^[0-9a-f]{64}$/),
+  criticScore: z.number().min(0).max(1),
+  content: contextContentSchema,
+  approvedBy: z.string().uuid().optional().nullable(),
+  approvedAt: z.string().optional().nullable(),
+  createdAt: z.string(),
+})
+
+const contextSnapshotsEnvelopeSchema = z.object({
+  data: z.object({ items: z.array(contextSnapshotSchema) }),
+  meta: metaSchema,
+})
+
+const discoveryRunSchema = z.object({
+  id: z.string().uuid(),
+  systemId: z.string().uuid(),
+  status: z.enum(['queued', 'discovering', 'context_review', 'planning', 'generating', 'scenario_review', 'published', 'paused', 'failed', 'cancelled']),
+  currentStage: z.string(),
+  sourceIds: z.array(z.string().uuid()),
+  contextSnapshot: contextSnapshotSchema.optional().nullable(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+})
+
+const discoveryRunEnvelopeSchema = z.object({ data: discoveryRunSchema, meta: metaSchema })
+const contextSnapshotEnvelopeSchema = z.object({ data: contextSnapshotSchema, meta: metaSchema })
+
 const errorEnvelopeSchema = z.object({
   error: z.object({
     code: z.string(),
@@ -134,6 +216,9 @@ export type SourceKind = z.infer<typeof sourceSummarySchema>['kind']
 export type SourceSummary = z.infer<typeof sourceSummarySchema>
 export type SourcesEnvelope = z.infer<typeof sourcesEnvelopeSchema>
 export type SourceEnvelope = z.infer<typeof sourceEnvelopeSchema>
+export type ContextSnapshot = z.infer<typeof contextSnapshotSchema>
+export type ContextSnapshotsEnvelope = z.infer<typeof contextSnapshotsEnvelopeSchema>
+export type DiscoveryRunEnvelope = z.infer<typeof discoveryRunEnvelopeSchema>
 export type CreateSystemInput = {
   displayName: string
   slug: string
@@ -294,6 +379,60 @@ export async function createSystem(
     body: JSON.stringify(input),
   })
   return parseResponse(response, systemEnvelopeSchema)
+}
+
+export async function fetchContextSnapshots(
+  tenantId: string,
+  systemId: string,
+  signal?: AbortSignal,
+): Promise<ContextSnapshotsEnvelope> {
+  const response = await fetch(`/api/v1/systems/${systemId}/context-snapshots?limit=20`, {
+    credentials: 'same-origin',
+    headers: { Accept: 'application/json', 'X-Holospan-Tenant-ID': tenantId },
+    signal,
+  })
+  return parseResponse(response, contextSnapshotsEnvelopeSchema)
+}
+
+export async function startContextDiscovery(
+  tenantId: string,
+  systemId: string,
+  csrfToken: string,
+  sourceIds: string[],
+): Promise<DiscoveryRunEnvelope> {
+  const response = await fetch(`/api/v1/systems/${systemId}/assurance-generation/runs`, {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      'X-Holospan-Tenant-ID': tenantId,
+      'X-CSRF-Token': csrfToken,
+      'Idempotency-Key': `discovery-${crypto.randomUUID()}`,
+    },
+    body: JSON.stringify({ sourceIds, budgetProfile: 'balanced' }),
+  })
+  return parseResponse(response, discoveryRunEnvelopeSchema)
+}
+
+export async function reviewContextSnapshot(
+  tenantId: string,
+  snapshotId: string,
+  csrfToken: string,
+  input: { decision: 'approve' | 'reject'; comment: string; expectedVersion: number },
+) {
+  const response = await fetch(`/api/v1/context-snapshots/${snapshotId}/review`, {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      'X-Holospan-Tenant-ID': tenantId,
+      'X-CSRF-Token': csrfToken,
+    },
+    body: JSON.stringify(input),
+  })
+  return parseResponse(response, contextSnapshotEnvelopeSchema)
 }
 
 export async function logout(): Promise<LogoutEnvelope> {

@@ -6,6 +6,14 @@ class ObjectStorageUnavailable(Exception):
 
 
 class ObjectStorage(Protocol):
+    async def get_object(
+        self,
+        *,
+        bucket: str,
+        object_key: str,
+        max_bytes: int,
+    ) -> bytes: ...
+
     async def put_object(
         self,
         *,

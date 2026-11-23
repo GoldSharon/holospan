@@ -1,0 +1,43 @@
+[project]
+name = "holospan-assurance-agent"
+version = "0.1.0"
+description = "Evidence-first discovery and assurance design runtime for Holospan"
+requires-python = "==3.13.*"
+dependencies = [
+  "pydantic==2.14.4",
+]
+
+[dependency-groups]
+dev = [
+  "bandit==1.9.4",
+  "mypy==2.4.1",
+  "pip-audit==2.10.1",
+  "pytest==9.2.0",
+  "ruff==0.17.6",
+]
+
+[build-system]
+requires = ["hatchling==1.28.0"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/holospan_assurance"]
+
+[tool.pytest.ini_options]
+addopts = "-q --strict-markers"
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "S"]
+ignore = ["S101"]
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+plugins = ["pydantic.mypy"]
+mypy_path = "src"

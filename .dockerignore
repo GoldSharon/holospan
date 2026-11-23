@@ -9,3 +9,9 @@
 **/dist
 **/coverage
 security/reports
+README.md
+docs
+evidence
+specs
+.env*
+agent/forge_agent

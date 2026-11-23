@@ -6,6 +6,7 @@ import {
   Braces,
   Check,
   CheckCircle2,
+  ClipboardCheck,
   Cloud,
   FileText,
   FileUp,
@@ -16,13 +17,14 @@ import {
   RotateCw,
   Search,
   ShieldCheck,
+  ShieldAlert,
   Sparkles,
   Workflow,
   X,
   type LucideIcon,
 } from 'lucide-react'
 import { type FormEvent, type KeyboardEvent as ReactKeyboardEvent, useEffect, useRef, useState } from 'react'
-import { ApiError, type CreateSystemInput, type SourceKind, type SourceSummary, type SystemSummary } from './api'
+import { ApiError, type ContextSnapshot, type CreateSystemInput, type SourceKind, type SourceSummary, type SystemSummary } from './api'
 
 const systemTypeLabels: Record<SystemSummary['systemType'], string> = {
   agent: 'AI agent',
@@ -427,10 +429,23 @@ export function SystemDetailWorkspace({
   canManageSources,
   isUploadPending,
   uploadError,
+  snapshots,
+  isSnapshotsPending,
+  isSnapshotsError,
+  canReadContext,
+  canGenerateContext,
+  canReviewContext,
+  isDiscoveryPending,
+  discoveryError,
+  isReviewPending,
+  reviewError,
   onBack,
   onRetrySystem,
   onRetrySources,
   onUpload,
+  onDiscover,
+  onReview,
+  onRetrySnapshots,
 }: {
   system?: SystemSummary
   sources: SourceSummary[]
@@ -442,14 +457,31 @@ export function SystemDetailWorkspace({
   canManageSources: boolean
   isUploadPending: boolean
   uploadError: Error | null
+  snapshots: ContextSnapshot[]
+  isSnapshotsPending: boolean
+  isSnapshotsError: boolean
+  canReadContext: boolean
+  canGenerateContext: boolean
+  canReviewContext: boolean
+  isDiscoveryPending: boolean
+  discoveryError: Error | null
+  isReviewPending: boolean
+  reviewError: Error | null
   onBack: () => void
   onRetrySystem: () => void
   onRetrySources: () => void
   onUpload: (kind: SourceKind, file: File) => Promise<void>
+  onDiscover: (sourceIds: string[]) => Promise<void>
+  onReview: (snapshotId: string, decision: 'approve' | 'reject', comment: string, expectedVersion: number) => Promise<void>
+  onRetrySnapshots: () => void
 }) {
   const [kind, setKind] = useState<SourceKind>('context_document')
   const [file, setFile] = useState<File | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const [selectedSourceIds, setSelectedSourceIds] = useState<string[]>([])
+  const [reviewDraft, setReviewDraft] = useState({ snapshotId: '', value: '' })
+  const latestSnapshot = snapshots[0]
+  const reviewComment = latestSnapshot?.id === reviewDraft.snapshotId ? reviewDraft.value : ''
 
   if (isSystemPending) {
     return <section className="system-detail-page"><div className="empty-state" role="status">Loading system…</div></section>
@@ -546,6 +578,106 @@ export function SystemDetailWorkspace({
           )}
         </section>
       </div>
+
+      <section className="context-discovery-section" aria-labelledby="context-discovery-title">
+        <div className="source-section-heading context-section-heading">
+          <div>
+            <p className="section-kicker">Discovery &amp; verification</p>
+            <h2 id="context-discovery-title">Build an evidence-backed system context</h2>
+            <p>Select the sources that describe this system. Holospan extracts only attributable capabilities and requires review before the context can drive test generation.</p>
+          </div>
+          {latestSnapshot && <span className={`context-status context-status-${latestSnapshot.status}`}>{latestSnapshot.status}</span>}
+        </div>
+
+        {!canReadContext && (
+          <div className="context-access-note"><ShieldAlert size={18} aria-hidden="true" /><span>Context discovery access is not assigned for this workspace.</span></div>
+        )}
+
+        {canReadContext && (
+          <div className="context-workspace-grid">
+            <div className="context-source-panel">
+              <div className="source-panel-heading">
+                <span className="source-category-icon"><Sparkles size={18} aria-hidden="true" /></span>
+                <div><h3>Discover context</h3><p>Combine requirements and API contracts. Every extracted claim keeps its source digest and location.</p></div>
+              </div>
+              {sources.length === 0 ? (
+                <div className="source-empty"><p>Upload at least one source before discovery.</p></div>
+              ) : (
+                <fieldset className="discovery-source-list">
+                  <legend>Evidence included in this run</legend>
+                  {sources.map((source) => (
+                    <label key={source.id}>
+                      <input
+                        type="checkbox"
+                        checked={selectedSourceIds.includes(source.id)}
+                        disabled={!canGenerateContext || isDiscoveryPending}
+                        onChange={(event) => setSelectedSourceIds((selected) => event.target.checked
+                          ? [...selected, source.id]
+                          : selected.filter((sourceId) => sourceId !== source.id))}
+                      />
+                      <span><strong>{source.originalFilename}</strong><small>{sourceKindLabels[source.kind]} · {formatBytes(source.byteSize)}</small></span>
+                    </label>
+                  ))}
+                </fieldset>
+              )}
+              {discoveryError && <div className="form-error" role="alert"><AlertCircle size={17} aria-hidden="true" /><span>{discoveryError instanceof ApiError ? discoveryError.message : 'Context discovery failed. Try again.'}</span></div>}
+              {!canGenerateContext && <p className="source-permission-note">You have read-only access to discovered context.</p>}
+              <button
+                className="primary-button"
+                type="button"
+                disabled={!canGenerateContext || selectedSourceIds.length === 0 || isDiscoveryPending}
+                onClick={() => { void onDiscover(selectedSourceIds) }}
+              >
+                <Sparkles size={16} aria-hidden="true" />{isDiscoveryPending ? 'Discovering…' : 'Discover context'}
+              </button>
+            </div>
+
+            <div className="context-review-panel">
+              {isSnapshotsPending && <div className="source-empty" role="status"><p>Loading discovered context…</p></div>}
+              {isSnapshotsError && <div className="source-empty" role="alert"><p>Discovered context is temporarily unavailable.</p><button className="secondary-button" type="button" onClick={onRetrySnapshots}>Retry</button></div>}
+              {!isSnapshotsPending && !isSnapshotsError && !latestSnapshot && <div className="source-empty"><ClipboardCheck size={22} aria-hidden="true" /><p>No context snapshot yet.</p><span>Run discovery to create a cited draft for human review.</span></div>}
+              {!isSnapshotsPending && !isSnapshotsError && latestSnapshot && (
+                <>
+                  <div className="context-review-heading">
+                    <div><p className="section-kicker">Context v{latestSnapshot.version}</p><h3>Review discovered capabilities</h3></div>
+                    <div className={`critic-score ${latestSnapshot.criticScore >= 0.9 ? 'critic-score-pass' : 'critic-score-fail'}`}><strong>{Math.round(latestSnapshot.criticScore * 100)}%</strong><span>critic score</span></div>
+                  </div>
+                  <div className="context-proof-strip">
+                    <span><strong>{latestSnapshot.content.claims.length}</strong> cited claims</span>
+                    <span><strong>{latestSnapshot.content.components.length}</strong> components</span>
+                    <span><strong>{latestSnapshot.content.gaps.length}</strong> gaps</span>
+                  </div>
+                  <div className="component-context-list">
+                    {latestSnapshot.content.components.map((component) => (
+                      <article key={component.key}>
+                        <h4>{component.display_name}</h4>
+                        {component.purpose && <p>{component.purpose}</p>}
+                        <ul>{component.capabilities.map((capability) => <li key={capability}>{capability}</li>)}</ul>
+                      </article>
+                    ))}
+                    {latestSnapshot.content.components.length === 0 && <p className="context-muted">No named component was found. Review the cited system-level claims below.</p>}
+                  </div>
+                  {latestSnapshot.content.gaps.length > 0 && (
+                    <details className="context-gaps"><summary>{latestSnapshot.content.gaps.length} discovery gap{latestSnapshot.content.gaps.length === 1 ? '' : 's'}</summary><ul>{latestSnapshot.content.gaps.map((gap, index) => <li key={`${gap.code}-${index}`}><strong>{gap.code.replaceAll('_', ' ')}</strong><span>{gap.message}</span></li>)}</ul></details>
+                  )}
+                  <details className="context-claims"><summary>Inspect cited claims</summary><ul>{latestSnapshot.content.claims.map((claim, index) => <li key={`${claim.subject_key}-${claim.claim_type}-${index}`}><div><span>{claim.claim_type}</span><strong>{String(claim.value)}</strong></div><small>{claim.citations.length} citation{claim.citations.length === 1 ? '' : 's'} · {Math.round(claim.confidence * 100)}% confidence</small></li>)}</ul></details>
+                  {latestSnapshot.status === 'draft' && (
+                    <div className="context-review-actions">
+                      <label className="form-field"><span>Review comment</span><textarea rows={2} maxLength={2000} value={reviewComment} onChange={(event) => setReviewDraft({ snapshotId: latestSnapshot.id, value: event.target.value })} placeholder="Record why this context is accepted or what must change." /></label>
+                      {reviewError && <div className="form-error" role="alert"><AlertCircle size={17} aria-hidden="true" /><span>{reviewError instanceof ApiError ? reviewError.message : 'The review could not be recorded.'}</span></div>}
+                      {!canReviewContext && <p className="source-permission-note">A context reviewer must approve or reject this draft.</p>}
+                      <div>
+                        <button className="secondary-button danger-button" type="button" disabled={!canReviewContext || reviewComment.trim().length === 0 || isReviewPending} onClick={() => { void onReview(latestSnapshot.id, 'reject', reviewComment, latestSnapshot.rowVersion) }}>Reject</button>
+                        <button className="primary-button" type="button" disabled={!canReviewContext || reviewComment.trim().length === 0 || isReviewPending || latestSnapshot.criticScore < 0.9} onClick={() => { void onReview(latestSnapshot.id, 'approve', reviewComment, latestSnapshot.rowVersion) }}><Check size={16} aria-hidden="true" />{isReviewPending ? 'Saving…' : 'Approve context'}</button>
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
+        )}
+      </section>
     </section>
   )
 }

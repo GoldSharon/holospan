@@ -26,13 +26,16 @@ import {
   ApiError,
   createSystem,
   fetchCapabilities,
+  fetchContextSnapshots,
   fetchOidcConfig,
   fetchSession,
   fetchSystem,
   fetchSystemSources,
   fetchSystems,
   logout,
+  reviewContextSnapshot,
   SESSION_EXPIRED_EVENT,
+  startContextDiscovery,
   uploadSystemSource,
   type CreateSystemInput,
   type Membership,
@@ -253,6 +256,9 @@ function Dashboard() {
   const canManageSystems = Boolean(activeMembership?.permissions.includes('system_context.systems.manage'))
   const canReadSources = Boolean(activeMembership?.permissions.includes('system_context.sources.read'))
   const canManageSources = Boolean(activeMembership?.permissions.includes('system_context.sources.manage'))
+  const canReadContext = Boolean(activeMembership?.permissions.includes('assurance_generation.context.read'))
+  const canGenerateContext = Boolean(activeMembership?.permissions.includes('assurance_generation.context.generate'))
+  const canReviewContext = Boolean(activeMembership?.permissions.includes('assurance_generation.context.review'))
   const capabilities = useQuery({
     queryKey: ['system-capabilities', activeTenantId],
     queryFn: ({ signal }) => fetchCapabilities(signal, activeTenantId),
@@ -283,6 +289,15 @@ function Dashboard() {
     enabled: session.isSuccess && !sessionExpired && Boolean(activeTenantId && selectedSystemId) && canReadSources,
     retry: false,
   })
+  const contextSnapshots = useQuery({
+    queryKey: ['context-snapshots', activeTenantId, selectedSystemId],
+    queryFn: ({ signal }) => {
+      if (!activeTenantId || !selectedSystemId) throw new Error('No active system')
+      return fetchContextSnapshots(activeTenantId, selectedSystemId, signal)
+    },
+    enabled: session.isSuccess && !sessionExpired && Boolean(activeTenantId && selectedSystemId) && canReadContext,
+    retry: false,
+  })
   const closeCreateDialog = useCallback(() => {
     setCreateDialogOpen(false)
     window.requestAnimationFrame(() => document.getElementById('create-system-action')?.focus())
@@ -311,6 +326,24 @@ function Dashboard() {
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['system-sources', activeTenantId, selectedSystemId] })
+    },
+  })
+  const discoverContextMutation = useMutation({
+    mutationFn: (sourceIds: string[]) => {
+      if (!activeTenantId || !selectedSystemId || !session.data?.data.csrfToken) throw new Error('No active system')
+      return startContextDiscovery(activeTenantId, selectedSystemId, session.data.data.csrfToken, sourceIds)
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['context-snapshots', activeTenantId, selectedSystemId] })
+    },
+  })
+  const reviewContextMutation = useMutation({
+    mutationFn: ({ snapshotId, decision, comment, expectedVersion }: { snapshotId: string; decision: 'approve' | 'reject'; comment: string; expectedVersion: number }) => {
+      if (!activeTenantId || !session.data?.data.csrfToken) throw new Error('No active workspace')
+      return reviewContextSnapshot(activeTenantId, snapshotId, session.data.data.csrfToken, { decision, comment, expectedVersion })
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['context-snapshots', activeTenantId, selectedSystemId] })
     },
   })
   const signOut = useMutation({
@@ -424,12 +457,29 @@ function Dashboard() {
                 canManageSources={canManageSources}
                 isUploadPending={uploadSourceMutation.isPending}
                 uploadError={uploadSourceMutation.error}
+                snapshots={contextSnapshots.data?.data.items ?? []}
+                isSnapshotsPending={contextSnapshots.isPending}
+                isSnapshotsError={contextSnapshots.isError}
+                canReadContext={canReadContext}
+                canGenerateContext={canGenerateContext}
+                canReviewContext={canReviewContext}
+                isDiscoveryPending={discoverContextMutation.isPending}
+                discoveryError={discoverContextMutation.error}
+                isReviewPending={reviewContextMutation.isPending}
+                reviewError={reviewContextMutation.error}
                 onBack={() => setSelectedSystemId(undefined)}
                 onRetrySystem={() => { void selectedSystem.refetch() }}
                 onRetrySources={() => { void systemSources.refetch() }}
                 onUpload={async (kind, file) => {
                   await uploadSourceMutation.mutateAsync({ kind, file })
                 }}
+                onDiscover={async (sourceIds) => {
+                  await discoverContextMutation.mutateAsync(sourceIds)
+                }}
+                onReview={async (snapshotId, decision, comment, expectedVersion) => {
+                  await reviewContextMutation.mutateAsync({ snapshotId, decision, comment, expectedVersion })
+                }}
+                onRetrySnapshots={() => { void contextSnapshots.refetch() }}
               />
             ) : (
               <SystemsWorkspace

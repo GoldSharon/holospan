@@ -40,6 +40,29 @@ class S3CompatibleObjectStorage:
             http_client=http_client,
         )
 
+    async def get_object(
+        self,
+        *,
+        bucket: str,
+        object_key: str,
+        max_bytes: int,
+    ) -> bytes:
+        def read() -> bytes:
+            response = self._client.get_object(bucket, object_key)
+            try:
+                data = response.read(max_bytes + 1)
+            finally:
+                response.close()
+                response.release_conn()
+            if len(data) > max_bytes:
+                raise ValueError("object exceeds the bounded read limit")
+            return data
+
+        try:
+            return await asyncio.to_thread(read)
+        except (S3Error, urllib3.exceptions.HTTPError, OSError, ValueError) as exc:
+            raise ObjectStorageUnavailable from exc
+
     async def put_object(
         self,
         *,

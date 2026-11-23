@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     object_storage_access_key: str = "holospan-admin"
     object_storage_secret_key: SecretStr = SecretStr("development-only-object-storage-secret")
     object_storage_bucket: str = "holospan-raw"
+    assurance_context_bucket: str = "holospan-evidence"
     object_storage_secure: bool = False
     object_storage_region: str = "us-east-1"
     object_storage_connect_timeout_seconds: float = Field(default=3.0, ge=0.5, le=30.0)
@@ -82,8 +83,7 @@ class Settings(BaseSettings):
             if not self.object_storage_secure:
                 raise ValueError("production object storage transport must use TLS")
             if self.oidc_enabled and (
-                self.oidc_client_secret is None
-                or not self.oidc_client_secret.get_secret_value()
+                self.oidc_client_secret is None or not self.oidc_client_secret.get_secret_value()
             ):
                 raise ValueError("production tenant OIDC requires a client secret")
             if self.platform_oidc_enabled and (

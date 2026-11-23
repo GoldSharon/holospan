@@ -5,14 +5,17 @@ SHELL := /usr/bin/env bash
 install:
 	cd frontend && npm ci
 	cd backend && uv sync --frozen
+	cd agent/holospan_assurance && uv sync --frozen
 
 lint:
 	cd frontend && npm run lint && npm run typecheck
 	cd backend && uv run ruff check . && uv run mypy src
+	cd agent/holospan_assurance && uv run ruff check . && uv run mypy src
 
 test:
 	cd frontend && npm test -- --run
 	cd backend && uv run pytest
+	cd agent/holospan_assurance && uv run pytest
 
 build:
 	cd frontend && npm run build

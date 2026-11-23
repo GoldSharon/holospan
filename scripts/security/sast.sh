@@ -6,7 +6,7 @@ cd "$repo_root"
 
 docker run --rm -v "$repo_root:/src:ro" -w /src semgrep/semgrep:1.145.2 \
   semgrep scan --no-git-ignore --config p/python --config p/typescript \
-  --config p/owasp-top-ten --error backend/src frontend/src
+  --config p/owasp-top-ten --error backend/src frontend/src agent/holospan_assurance/src
 
 docker run --rm -v "$repo_root:/repo:ro" zricethezav/gitleaks:v8.30.0 \
   detect --source /repo --no-git --config /repo/.gitleaks.toml --redact --exit-code 1
@@ -27,6 +27,16 @@ docker run --rm -v "$repo_root:/repo:ro" -v holospan-trivy-cache:/root/.cache/tr
 
 (
   cd backend
+  uv sync --frozen
+  uv run pip-audit
+  uv run bandit -q -r src
+  uv run ruff check .
+  uv run mypy src
+  uv run pytest
+)
+
+(
+  cd agent/holospan_assurance
   uv sync --frozen
   uv run pip-audit
   uv run bandit -q -r src
